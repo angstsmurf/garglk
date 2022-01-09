@@ -54,11 +54,13 @@ typedef struct
 
 typedef struct
 {
-	char *Text;
-	/* PORTABILITY WARNING: THESE TWO MUST BE 8 BIT VALUES. */
-	unsigned char Location;
-	unsigned char InitialLoc;
-	char *AutoGet;
+    char *Text;
+    /* PORTABILITY WARNING: THESE TWO MUST BE 8 BIT VALUES. */
+    unsigned char Location;
+    unsigned char InitialLoc;
+    char *AutoGet;
+    unsigned char Flag;
+    unsigned char Image;
 } Item;
 
 typedef struct

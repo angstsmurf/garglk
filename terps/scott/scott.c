@@ -101,6 +101,8 @@ static int Options;		/* Option flags set */
 static int Width;		/* Terminal width */
 static int TopHeight;		/* Height of top window */
 
+static int file_baseline_offset = 0;
+
 static int split_screen = 1;
 static winid_t Bottom, Top;
 
@@ -244,145 +246,614 @@ static char *ReadString(FILE *f)
 	return(t);
 }
 
+size_t get_file_length(FILE *in) {
+    if (fseek(in, 0, SEEK_END) == -1)
+    {
+        return 0;
+    }
+    size_t file_length = ftell(in);
+    if (file_length == -1)
+    {
+        return 0;
+    }
+    return file_length;
+}
+
+int rotate_left_with_carry(uint8_t *byte, int last_carry)
+{
+    int carry = ((*byte & 0x80) > 0);
+    *byte = *byte << 1;
+    if (last_carry)
+        *byte = *byte | 0x01;
+    return carry;
+}
+
+int rotate_right_with_carry(uint8_t *byte, int last_carry)
+{
+    int carry = ((*byte & 0x01) > 0);
+    *byte = *byte >> 1;
+    if (last_carry)
+        *byte = *byte | 0x80;
+    return carry;
+}
+
+int decompress_one(uint8_t *bytes) {
+    uint8_t result = 0;
+    int carry;
+    for (int i = 0; i < 5; i++)
+    {
+        carry = 0;
+        for (int j = 0; j < 5; j++)
+        {
+            carry = rotate_left_with_carry(bytes+4-j, carry);
+        }
+        rotate_left_with_carry(&result, carry);
+    }
+    return result;
+}
+
+
+static char *decompressed(uint8_t *source, int stringindex)
+{
+    // Lookup table
+    const char *alphabet = " abcdefghijklmnopqrstuvwxyz'\x01,.\x00";
+
+    int pos, c, uppercase, i, j;
+    uint8_t decompressed[256];
+    uint8_t buffer[5];
+    int idx = 0;
+
+    // Find the start of the compressed message
+    for(int i = 0; i < stringindex; i++) {
+        pos = *source;
+        pos = pos & 0x7F;
+        source += pos;
+    };
+
+    uppercase = ((*source & 0x40) == 0); // Test bit 6
+
+    source++;
+    do {
+        // Get five compressed bytes
+        for (i = 0; i < 5; i++) {
+            buffer[i] = *source++;
+        }
+        for (j = 0; j < 8; j++) {
+            // Decompress one character:
+            int next = decompress_one(buffer);
+
+            c = alphabet[next];
+
+            if (c == 0x01) {
+                uppercase = 1;
+                c = ' ';
+            }
+
+            if (c >= 'a' && uppercase) {
+                c = toupper(c);
+                uppercase = 0;
+            }
+            decompressed[idx++] = c;
+
+            if (idx > 255)
+                return NULL;
+
+            if (idx == 255)
+                c = 0; // We've gone too far, return
+
+            if (c == 0) {
+                char *result = malloc(idx);
+                memcpy(result, decompressed, idx);
+                return result;
+            } else if (c == '.' || c == ',') {
+                if (c == '.')
+                    uppercase = 1;
+                decompressed[idx++] = ' ';
+            }
+        }
+    } while (idx < 0xff);
+    return NULL;
+}
+
+static char *decompress_text(FILE *p, int offset, int index)
+{
+    size_t length = get_file_length(p);
+    uint8_t *buf = (uint8_t *)malloc(length);
+    fseek(p, 0, SEEK_SET);
+    fread(buf, sizeof *buf, length, p);
+
+    //    offset = 0x912c; // Messages
+    //    offset = 0x9B53; // Room descriptions
+    //    offset = 0x9B66; // Item descriptions
+
+    uint8_t *mem = (uint8_t *)malloc(0xFFFF);
+    memset(mem, 0, 0xffff);
+    for (int i = 0; i<length; i++) {
+        mem[i+16357] = buf[i];
+    }
+
+    char *text = decompressed(mem+offset, index);
+    free(mem);
+    return text;
+}
+
+int header[36];
+
+void read_header(FILE *in) {
+    int i,value;
+    for (i = 0; i < 36; i++)
+    {
+        value = fgetc(in) + 256 * fgetc(in);
+        header[i] = value;
+    }
+}
+
+void read_dictionary(FILE *ptr)
+{
+    char dictword[6];
+    int offset = 0x591B;
+tryagain:
+
+
+
+    fseek(ptr, offset ,SEEK_SET);
+
+    char c = 0;
+    int wordnum = 0;
+    int charindex = 0;
+
+    do {
+        for (int i = 0; i < 4; i++)
+        {
+            c=fgetc(ptr);
+            if (charindex == 0) {
+                if (c >= 'a')
+                {
+                    c = toupper(c);
+                } else {
+                    dictword[charindex++] = '*';
+                }
+            }
+
+
+            dictword[charindex++] = c;
+
+        }
+        dictword[charindex] = 0;
+
+
+        if (wordnum < 69)
+        {
+            Verbs[wordnum] = malloc(charindex+1);
+            memcpy((char *)Verbs[wordnum], dictword, charindex+1);
+            //            if (wordnum == 0 && strncmp(Verbs[wordnum], "AUTO", 4) != 0) {
+            //                offset++;
+            //                goto tryagain;
+            //            }
+            //            fprintf(stderr, "Verb %d: \"%s\"\n", wordnum, Verbs[wordnum]);
+        } else {
+            Nouns[wordnum-69] = malloc(charindex+1);
+            memcpy((char *)Nouns[wordnum-69], dictword, charindex+1);
+            //            fprintf(stderr, "Noun %d: \"%s\"\n", wordnum-69, Nouns[wordnum-69]);
+        }
+        wordnum++;
+        //      }
+        //        if (c != 0 && !isascii(c))
+        //            return;
+        charindex = 0;
+    } while (wordnum <= 203);
+
+    for (int i = 0; i < 66; i++) {
+        Verbs[69 + i] = "\0";
+        //        fprintf(stderr, "Verb %d: \"%s\"\n", 69 + i, Verbs[69 + i]);
+    }
+    //    fprintf(stderr, "Found valid dictionary at offset %d\n", offset);
+
+}
+
+int sanity_check_header(void) {
+
+    int16_t v = header[1]; // items
+    if (v < 10 || v > 500)
+        return 0;
+    v = header[2]; // actions
+    if (v < 100 || v > 500)
+        return 0;
+    v = header[3]; // word pairs
+    if (v < 50 || v > 200)
+        return 0;
+    v = header[4]; // Number of rooms
+    if (v < 10 || v > 100)
+        return 0;
+    v = header[5]; // Number of Messages
+    if (v < 10 || v > 255)
+        return 0;
+
+    return 1;
+}
+
 static void LoadDatabase(FILE *f, int loud)
 {
-	int ni,na,nw,nr,mc,pr,tr,wl,lt,mn,trm;
-	int ct;
-	short lo;
-	Action *ap;
-	Room *rp;
-	Item *ip;
-/* Load the header */
+    int ni,na,nw,nr,mc,pr,tr,wl,lt,mn,trm;
+    int ct;
+    //    short lo;
+    Action *ap;
+    Room *rp;
+    Item *ip;
 
-	if(fscanf(f,"%*d %d %d %d %d %d %d %d %d %d %d %d",
-		&ni,&na,&nw,&nr,&mc,&pr,&tr,&wl,&lt,&mn,&trm)<10)
-		Fatal("Invalid database(bad header)");
-	GameHeader.NumItems=ni;
-	Items=(Item *)MemAlloc(sizeof(Item)*(ni+1));
-	GameHeader.NumActions=na;
-	Actions=(Action *)MemAlloc(sizeof(Action)*(na+1));
-	GameHeader.NumWords=nw;
-	GameHeader.WordLength=wl;
-	Verbs=MemAlloc(sizeof(char *)*(nw+1));
-	Nouns=MemAlloc(sizeof(char *)*(nw+1));
-	GameHeader.NumRooms=nr;
-	Rooms=(Room *)MemAlloc(sizeof(Room)*(nr+1));
-	GameHeader.MaxCarry=mc;
-	GameHeader.PlayerRoom=pr;
-	GameHeader.Treasures=tr;
-	GameHeader.LightTime=lt;
-	LightRefill=lt;
-	GameHeader.NumMessages=mn;
-	Messages=MemAlloc(sizeof(char *)*(mn+1));
-	GameHeader.TreasureRoom=trm;
+    /* Load the header */
 
-/* Load the actions */
+    size_t file_length = get_file_length(f);
 
-	ct=0;
-	ap=Actions;
-	if(loud)
-		printf("Reading %d actions.\n",na);
-	while(ct<na+1)
-	{
-		if(fscanf(f,"%hu %hu %hu %hu %hu %hu %hu %hu",
-			&ap->Vocab,
-			&ap->Condition[0],
-			&ap->Condition[1],
-			&ap->Condition[2],
-			&ap->Condition[3],
-			&ap->Condition[4],
-			&ap->Action[0],
-			&ap->Action[1])!=8)
-		{
-			printf("Bad action line (%d)\n",ct);
-			exit(1);
-		}
-		ap++;
-		ct++;
-	}
-	ct=0;
-	if(loud)
-		printf("Reading %d word pairs.\n",nw);
-	while(ct<nw+1)
-	{
-		Verbs[ct]=ReadString(f);
-		Nouns[ct]=ReadString(f);
-		ct++;
-	}
-	ct=0;
-	rp=Rooms;
-	if(loud)
-		printf("Reading %d rooms.\n",nr);
-	while(ct<nr+1)
-	{
-		if(fscanf(f,"%hd %hd %hd %hd %hd %hd",
-			&rp->Exits[0],&rp->Exits[1],&rp->Exits[2],
-			&rp->Exits[3],&rp->Exits[4],&rp->Exits[5])!=6)
-		{
-			printf("Bad room line (%d)\n",ct);
-			exit(1);
-		}
-		rp->Text=ReadString(f);
-		ct++;
-		rp++;
-	}
-	ct=0;
-	if(loud)
-		printf("Reading %d messages.\n",mn);
-	while(ct<mn+1)
-	{
-		Messages[ct]=ReadString(f);
-		ct++;
-	}
-	ct=0;
-	if(loud)
-		printf("Reading %d items.\n",ni);
-	ip=Items;
-	while(ct<ni+1)
-	{
-		ip->Text=ReadString(f);
-		ip->AutoGet=strchr(ip->Text,'/');
-		/* Some games use // to mean no auto get/drop word! */
-		if(ip->AutoGet && strcmp(ip->AutoGet,"//") && strcmp(ip->AutoGet,"/*"))
-		{
-			char *t;
-			*ip->AutoGet++=0;
-			t=strchr(ip->AutoGet,'/');
-			if(t!=NULL)
-				*t=0;
-		}
-		if(fscanf(f,"%hd",&lo)!=1)
-		{
-			printf("Bad item line (%d)\n",ct);
-			exit(1);
-		}
-		ip->Location=(unsigned char)lo;
-		ip->InitialLoc=ip->Location;
-		ip++;
-		ct++;
-	}
-	ct=0;
-	/* Discard Comment Strings */
-	while(ct<na+1)
-	{
-		free(ReadString(f));
-		ct++;
-	}
-	if(fscanf(f,"%d",&ct)!=1)
-	{
-		puts("Cannot read version");
-		exit(1);
-	}
-	if(loud)
-		printf("Version %d.%02d of Adventure ",
-		ct/100,ct%100);
-	if(fscanf(f,"%d",&ct)!=1)
-	{
-		puts("Cannot read adventure number");
-		exit(1);
-	}
-	if(loud)
-		printf("%d.\nLoad Complete.\n\n",ct);
+    size_t pos = 0x3b5a;
+    fseek(f, pos, SEEK_SET);
+    read_header(f);
+    if (sanity_check_header() == 0) {
+        pos = 0;
+
+        while (sanity_check_header() == 0) {
+            pos++;
+            fseek(f, pos, SEEK_SET);
+            read_header(f);
+            if (pos >= file_length - 24) {
+                fprintf(stderr, "found no valid header in file\n");
+                exit(1);
+            }
+        }
+    }
+
+    file_baseline_offset = pos - 0x494d;
+
+    ni = header[1];
+    na = header[2];
+    nw = header[3];
+    nr = header[4];
+    mc = header[5];
+    wl = header[6];
+    mn = header[7];
+    pr = 1;
+    //    pr = 46;
+    //    pr = 86;
+    tr = 0;
+    lt = -1;
+    trm = 0;
+
+    GameHeader.NumItems=ni;
+    Items=(Item *)MemAlloc(sizeof(Item)*(ni+1));
+    GameHeader.NumActions=na;
+    Actions=(Action *)MemAlloc(sizeof(Action)*(na+1));
+    GameHeader.NumWords=nw;
+    GameHeader.WordLength=wl;
+    Verbs=MemAlloc(sizeof(char *)*(nw+1));
+    Nouns=MemAlloc(sizeof(char *)*(nw+1));
+    GameHeader.NumRooms=nr;
+    Rooms=(Room *)MemAlloc(sizeof(Room)*(nr+1));
+    GameHeader.MaxCarry=mc;
+    GameHeader.PlayerRoom=pr;
+    GameHeader.Treasures=tr;
+    GameHeader.LightTime=lt;
+    LightRefill=lt;
+    GameHeader.NumMessages=mn;
+    Messages=MemAlloc(sizeof(char *)*(mn+1));
+    GameHeader.TreasureRoom=trm;
+
+    int offset;
+
+
+#pragma mark Item flags
+    offset = 0x4961 + file_baseline_offset;
+
+    //    fprintf(stderr, "File offset before reading item flags: %ld\n", ftell(f));
+
+jumpItemFlags:
+    fseek(f,offset,SEEK_SET);
+
+    /* Load the item flags */
+
+    ip=Items;
+
+    for (ct = 0; ct <= GameHeader.NumItems; ct++) {
+        ip->Flag = fgetc(f);
+        if((ct == 17 && (ip->Flag & 127) != 1)) {
+            offset++;
+            goto jumpItemFlags;
+        }
+        ip++;
+    }
+
+
+    //    fprintf(stderr, "Found item flags at %d\n", offset);
+    //    fprintf(stderr, "Difference from expected 0x4961: %d\n", offset - 0x4961);
+    //    fprintf(stderr, "Difference from expected 0x4961 + file_baseline_offset(%d) : %d\n", file_baseline_offset, offset - (0x4961 + file_baseline_offset));
+    //    fprintf(stderr, "File offset after reading item flags: %ld\n", ftell(f));
+
+
+
+    offset = 0x46CC + file_baseline_offset;
+
+jumpItemImages:
+    fseek(f,offset,SEEK_SET);
+
+#pragma mark item images
+
+    /* Load the item images */
+
+    ip=Items;
+
+    for (ct = 0; ct <= GameHeader.NumItems; ct++) {
+        ip->Image = fgetc(f);
+        if ((ct == 17 && ip->Image != 138) || (ip->Image > 138 && ip->Image != 255)) {
+            offset++;
+            goto jumpItemImages;
+        }
+        ip++;
+    }
+    //    fprintf(stderr, "Found item images at %x\n", offset);
+    //    fprintf(stderr, "File offset after reading item images: %lx\n", ftell(f));
+    //
+
+    offset = 0x4A5D  + file_baseline_offset;;
+jumpHere:
+
+#pragma mark actions
+
+    /* Load the actions */
+
+    fseek(f,offset,SEEK_SET);
+    ct=0;
+
+    Actions=(Action *)malloc(sizeof(Action)*(na+1));
+    ap=Actions;
+
+    int value, cond, comm;
+    while(ct<na+1)
+    {
+        value = fgetc(f) + 256 * fgetc(f); /* verb/noun */
+        ap->Vocab = value;
+
+        int verb = value;
+
+        int noun=verb%150;
+        verb/=150;
+
+        if (noun < 0 || noun > nw || verb < 0 || verb > nw) {
+            offset--;
+            goto jumpHere;
+        }
+
+        value = fgetc(f); /* count of actions/conditions */
+        cond = value & 0x1f;
+        comm = (value & 0xe0) >> 5;
+
+        //        fprintf(stderr, "Action %d conditions: %d commands %d\n", ct, cond, comm);
+
+        for (int j = 0; j < 5; j++)
+        {
+            if (j < cond) value = fgetc(f) + 256 * fgetc(f); else value = 0;
+            ap->Condition[j] = value;
+        }
+        for (int j = 0; j < 2; j++)
+        {
+            if (j < comm) value = fgetc(f) + 256 * fgetc(f); else value = 0;
+            ap->Action[j] = value;
+        }
+
+        ap++;
+        ct++;
+    }
+    //
+    //    fprintf(stderr, "Found valid actions at offset %d\n", offset);
+    //    fprintf(stderr, "File offset after reading actions: %ld\n", ftell(f));
+
+
+    //    for (int i = 0; i <= GameHeader.NumActions; i++) {
+    //        for (int j = 0; j < 2; j++) {
+    //
+    //            int value = Actions[i].Action[j];
+    //            int action1 = value % 150;
+    //            //fprintf(stderr, "Action %d noun: %s\n", ct, Nouns[noun]);
+    //            int action2 = value / 150;
+    //
+    //            if (action1 == 10 || action2 == 10) {
+    //                print_action_info(i);
+    //                break;
+    //            }
+    //        }
+    //    }
+
+
+
+
+
+#pragma mark dictionary
+
+    fseek(f, 0x591B + file_baseline_offset,SEEK_SET);
+
+    read_dictionary(f);
+
+    //    for (int i = 0; i <= na; i++)
+    //    {
+    //        int vocab = Actions[i].Vocab;
+    //
+    //        int verb = vocab;
+    //
+    //        int noun=verb%150;
+    //
+    //        verb/=150;
+    //
+    //        fprintf(stderr, "Action %d verb: %s (%d) noun: %s (%d)\n", i,  Verbs[verb], verb, Nouns[noun], noun);
+    //    }
+
+    //    fprintf(stderr, "File offset after reading dictionary: %ld\n", ftell(f));
+
+    offset = 23627 + file_baseline_offset;
+
+#pragma mark room connections
+try_again_connections:
+
+    fseek(f,offset,SEEK_SET);
+
+    ct=0;
+    rp=Rooms;
+    //    if(loud)
+
+    while(ct<nr)
+    {
+        for (int j= 0; j < 6; j++) {
+            rp->Exits[j] = fgetc(f);
+            if (rp->Exits[j] < 0 || rp->Exits[j] > nr || (ct == 11 && j == 4 && rp->Exits[j] != 1) || (ct == 1 && j == 5 && rp->Exits[j] != 11)) {
+                offset++;
+                goto try_again_connections;
+            }
+
+        }
+        ct++;
+        rp++;
+    }
+    //
+    //    fprintf(stderr, "Reading %d X 6 room connections, total of %d bytes.\n",nr, nr * 6);
+    //    fprintf(stderr, "Found room connections at offset %d.\n", offset);
+    //
+    //    fprintf(stderr, "File offset after reading room connections: %ld\n", ftell(f));
+
+#pragma mark item locations
+
+    offset = 0x5e3d + file_baseline_offset;
+jumpItemLoc:
+
+    fseek(f,offset,SEEK_SET);
+
+    ct=0;
+    ip=Items;
+    while(ct<ni+1)
+    {
+        ip->Location=fgetc(f);
+        if ((ct == 41 && ip->Location != 11) || (ct == 123 && ip->Location != 11)) {
+            offset++;
+            goto jumpItemLoc;
+        }
+
+        ip->InitialLoc=ip->Location;
+        ip++;
+        ct++;
+    }
+
+    //    fprintf(stderr, "Found item locations at offset: %d\n", offset);
+    //    fprintf(stderr, "Difference from expected 0x5e3d: %d\n", offset - 0x5e3d);
+    //    fprintf(stderr, "Difference from expected 0x5e3d + file_baseline_offset(%d) : %d\n", file_baseline_offset, offset - (0x5e3d + file_baseline_offset));
+    //
+    //    fprintf(stderr, "File offset after reading item locations : %ld\n", ftell(f));
+
+#pragma mark messages
+
+    offset = 0x9ea0 + file_baseline_offset;
+    if(loud)
+        fprintf(stderr, "Reading %d messages.\n",mn);
+
+jumpHereMessages:
+
+    ct=0;
+
+    while(ct<mn+1)
+    {
+        Messages[ct] = decompress_text(f, offset, ct);
+
+
+        //        if (Messages[ct] == NULL || (ct == 0 && (Messages[ct] == NULL || strncmp(Messages[ct], ". ", 2) != 0))) {
+        //            offset--;
+        //            if (offset > 0xFFFF)
+        //                fprintf(stderr, "Error");
+        //            goto jumpHereMessages;
+        //        }
+        //        fprintf(stderr, "Message %d : \"%s\"\n", ct, Messages[ct]);
+        ct++;
+    }
+
+    //    fprintf(stderr, "Found valid messages at %d\n", offset);
+
+#pragma mark rooms
+
+    offset = 42928 + file_baseline_offset;
+
+
+    if(loud)
+        fprintf(stderr, "Reading %d rooms.\n",nr);
+
+jumpHereRooms:
+
+    ct=0;
+    rp=Rooms;
+
+    //    char c=0;
+
+    //    rp->Text = malloc(3);
+    //    strcpy(rp->Text, ". \0");
+    //    //    fprintf(stderr, "Room 0 : \"%s\"\n", rp->Text);
+    //    rp++;
+
+    //    int actual_room_number = 0;
+
+    do {
+        rp->Text = decompress_text(f, offset, ct);
+
+        //        if ((ct == 1 && (rp->Text == NULL || strncmp(rp->Text, "On the Banshee", 14) != 0))) {
+        //            offset++;
+        //            goto jumpHereRooms;
+        //        }
+
+
+        //        fprintf(stderr, "Room %d : \"%s\"\n", ct, Rooms[ct].Text);
+        *(rp->Text) = tolower(*(rp->Text));
+        ct++;
+        rp++;
+    } while (ct<GameHeader.NumRooms);
+
+    //    fprintf(stderr, "Found room descriptions at offset %d.\n", offset);
+
+
+#pragma mark items
+
+    //    offset = 0x3e67 + file_baseline_offset;
+    offset = 44229 + file_baseline_offset;
+    if(loud)
+        fprintf(stderr, "Reading %d items.\n",ni);
+
+
+    ct=0;
+
+    ip=Items;
+
+    do {
+        ip->Text = decompress_text(f, offset, ct);
+        //
+        //                if ((ct == 0 && (ip->Text == NULL || strncmp(ip->Text, "Lagash", 6) != 0))) {
+        //                    offset++;
+        //                    goto try_again;
+        //                }
+        //        fprintf(stderr, "Item %d : \"%s\"\n", ct,  ip->Text);
+
+        ip->AutoGet=strchr(ip->Text,'.');
+        //            /* Some games use // to mean no auto get/drop word! */
+        if(ip->AutoGet)
+        {
+            char *t;
+            *ip->AutoGet++=0;
+            ip->AutoGet++;
+            t=strchr(ip->AutoGet,'.');
+            if(t!=NULL)
+                *t=0;
+            for (int i = 1; i < 4; i++)
+                *(ip->AutoGet+i) = toupper(*(ip->AutoGet+i));
+            //            fprintf(stderr, "Autoget: \"%s\"\n", ip->AutoGet);
+        }
+
+
+        ct++;
+        ip++;
+    } while(ct<ni+1);
+
+    if(loud)
+        fprintf(stderr, "%d.\nLoad Complete.\n\n",ct);
 }
 
 static void Output(const char *a)
