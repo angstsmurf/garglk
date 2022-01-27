@@ -321,5 +321,10 @@ endif()
 #
 if(WITH_SCOTT)
     terp(scott
-        SRCS scott/scott.c scott/bsd.c)
+        SRCS scott/scott.c scott/bsd.c scott/decompresstext.c
+        scott/decompressz80.c scott/detectgame.c
+        scott/game_specific.c scott/gremlins.c scott/hulk.c
+        scott/layouttext.c scott/parser.c scott/restorestate.c
+        scott/robinofsherwood.c scott/sagadraw.c scott/scott.c
+        scott/seasofblood.c)
 endif()
