@@ -443,7 +443,6 @@ jumpHere:
         return 0;
 
     ct=0;
-    c=0;
     charindex = 0;
 
     while(ct<mn+1)

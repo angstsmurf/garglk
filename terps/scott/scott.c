@@ -110,7 +110,6 @@ uint8_t *entire_file;
 size_t file_length;
 
 int AnimationFlag = 0;
-int DrawingFlag = 0;
 
 extern struct SavedState *initial_state;
 
@@ -169,13 +168,9 @@ void Updates(event_t ev) {
 			Look();
 		}
 	} else if(ev.type == evtype_Timer) {
-		if (CurrentGame == ROBIN_OF_SHERWOOD) {
-			if (!DrawingFlag) {
-				DrawingFlag = 1;
-				update_robin_of_sherwood_animations();
-				DrawingFlag = 0;
-			}
-		} else if (GameInfo->type == GREMLINS_VARIANT)
+		if (CurrentGame == ROBIN_OF_SHERWOOD)
+			update_robin_of_sherwood_animations();
+		else if (GameInfo->type == GREMLINS_VARIANT)
 			update_gremlins_animations();
 	}
 }
@@ -252,7 +247,6 @@ void OpenTopWindow(void) {
 		}
 	}
 }
-
 
 void OpenGraphicsWindow(void)
 {
@@ -1139,8 +1133,7 @@ static void TranscriptOff(void)
 	Output(sys[TRANSCRIPT_OFF]);
 }
 
-int PerformExtraCommand(void){
-
+int PerformExtraCommand(void) {
 	struct Command command = *CurrentCommand;
 	int verb = command.verb;
 	if (verb > GameHeader.NumWords)
@@ -1294,6 +1287,9 @@ void ListInventory(void) {
 	}
 	if (anything == 0)
 		Output(sys[NOTHING]);
+	if (Transcript) {
+		glk_put_char_stream_uni(Transcript, 10);
+	}
 }
 
 

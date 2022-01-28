@@ -133,7 +133,6 @@ extern int LightRefill;
 extern int Counters[];
 extern int AnimationFlag;
 extern int SavedRoom;
-extern int DrawingFlag;
 
 
 #endif /* scott_h */

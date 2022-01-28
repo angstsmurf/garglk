@@ -11,6 +11,10 @@
 #include "hulk.h"
 #include "detectgame.h"
 
+extern void read_header(uint8_t *ptr);
+extern void print_header_info(int header[]);
+extern int header[];
+
 void hulk_show_image_on_examine(int noun) {
     int image = 0;
     switch (noun) {
@@ -161,10 +165,6 @@ uint8_t *read_hulk_dictionary(struct GameInfo info, uint8_t **pointer)
 
     return ptr;
 }
-
-extern void read_header(uint8_t *ptr);
-extern void print_header_info(int header[]);
-extern int header[];
 
 int try_loading_hulk(struct GameInfo info, int dict_start) {
     int ni,na,nw,nr,mc,pr,tr,wl,lt,mn,trm;

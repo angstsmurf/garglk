@@ -21,8 +21,6 @@ uint8_t sprite[256][8];
 uint8_t screenchars[768][8];
 uint8_t buffer[384][9];
 
-
-
 Image *images = NULL;
 
 int pixel_size;

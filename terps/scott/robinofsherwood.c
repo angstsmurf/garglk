@@ -177,8 +177,6 @@ void animate_lightning(int stage) {
 }
 
 void robin_of_sherwood_look(void) {
-    glk_request_timer_events(0);
-    DrawingFlag = 0;
     if (!is_forest_location()) {
         if (Rooms[MyLoc].Image == 255) {
             CloseGraphicsWindow();
