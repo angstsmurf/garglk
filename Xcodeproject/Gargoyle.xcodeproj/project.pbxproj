@@ -40,6 +40,27 @@
 		C321E50D275CBC6100230208 /* fontmac.mm in Sources */ = {isa = PBXBuildFile; fileRef = C392C40E275A1088003109E6 /* fontmac.mm */; };
 		C321E50E275CBC9D00230208 /* ttsmac.mm in Sources */ = {isa = PBXBuildFile; fileRef = C392C407275A1088003109E6 /* ttsmac.mm */; };
 		C321E51E275CC31100230208 /* launcher.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C392C415275A1088003109E6 /* launcher.cpp */; };
+		C373920A27A2EEAD009147EF /* gremlins.c in Sources */ = {isa = PBXBuildFile; fileRef = C37391E827A2EEAA009147EF /* gremlins.c */; };
+		C373920B27A2EEAD009147EF /* layouttext.c in Sources */ = {isa = PBXBuildFile; fileRef = C37391EB27A2EEAA009147EF /* layouttext.c */; };
+		C373920C27A2EEAD009147EF /* scott.c in Sources */ = {isa = PBXBuildFile; fileRef = C37391EE27A2EEAA009147EF /* scott.c */; };
+		C373920D27A2EEAD009147EF /* restorestate.c in Sources */ = {isa = PBXBuildFile; fileRef = C37391F027A2EEAA009147EF /* restorestate.c */; };
+		C373920E27A2EEAD009147EF /* debug.c in Sources */ = {isa = PBXBuildFile; fileRef = C37391F127A2EEAA009147EF /* debug.c */; };
+		C373920F27A2EEAD009147EF /* hulk.c in Sources */ = {isa = PBXBuildFile; fileRef = C37391F427A2EEAB009147EF /* hulk.c */; };
+		C373921027A2EEAD009147EF /* game_specific.c in Sources */ = {isa = PBXBuildFile; fileRef = C37391F627A2EEAB009147EF /* game_specific.c */; };
+		C373921127A2EEAD009147EF /* decompressz80.c in Sources */ = {isa = PBXBuildFile; fileRef = C37391F927A2EEAB009147EF /* decompressz80.c */; };
+		C373921227A2EEAD009147EF /* sagadraw.c in Sources */ = {isa = PBXBuildFile; fileRef = C37391FA27A2EEAB009147EF /* sagadraw.c */; };
+		C373921327A2EEAD009147EF /* seasofblood.c in Sources */ = {isa = PBXBuildFile; fileRef = C37391FB27A2EEAB009147EF /* seasofblood.c */; };
+		C373921427A2EEAD009147EF /* detectgame.c in Sources */ = {isa = PBXBuildFile; fileRef = C373920227A2EEAC009147EF /* detectgame.c */; };
+		C373921527A2EEAD009147EF /* decompresstext.c in Sources */ = {isa = PBXBuildFile; fileRef = C373920327A2EEAC009147EF /* decompresstext.c */; };
+		C373921627A2EEAD009147EF /* parser.c in Sources */ = {isa = PBXBuildFile; fileRef = C373920527A2EEAC009147EF /* parser.c */; };
+		C373921727A2EEAD009147EF /* bsd.c in Sources */ = {isa = PBXBuildFile; fileRef = C373920627A2EEAC009147EF /* bsd.c */; };
+		C373921827A2EEAD009147EF /* robinofsherwood.c in Sources */ = {isa = PBXBuildFile; fileRef = C373920727A2EEAC009147EF /* robinofsherwood.c */; };
+		C373921927A2F0E1009147EF /* glkmain.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = C321E4DA275CB6C600230208 /* glkmain.dylib */; };
+		C373921A27A2F0E1009147EF /* glkmain.dylib in Embed Libraries */ = {isa = PBXBuildFile; fileRef = C321E4DA275CB6C600230208 /* glkmain.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		C373921E27A2F0E4009147EF /* libgarglk.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = C321E4D2275CB6B500230208 /* libgarglk.dylib */; };
+		C373921F27A2F0E4009147EF /* libgarglk.dylib in Embed Libraries */ = {isa = PBXBuildFile; fileRef = C321E4D2275CB6B500230208 /* libgarglk.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		C373922327A2F1D9009147EF /* libSDL2_mixer-2.0.0.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = C373922227A2F1D9009147EF /* libSDL2_mixer-2.0.0.dylib */; };
+		C373922527A2F2AA009147EF /* scott in Copy Interpreter Files */ = {isa = PBXBuildFile; fileRef = C37391E127A2EE88009147EF /* scott */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		C392C43F275A1088003109E6 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = C392C3D3275A1088003109E6 /* LICENSE */; };
 		C392C455275A1088003109E6 /* house.icns in Resources */ = {isa = PBXBuildFile; fileRef = C392C3EE275A1088003109E6 /* house.icns */; };
 		C392C45F275A1088003109E6 /* garglk.ini in Resources */ = {isa = PBXBuildFile; fileRef = C392C3FF275A1088003109E6 /* garglk.ini */; };
@@ -143,6 +164,20 @@
 			remoteGlobalIDString = C321E4D9275CB6C600230208;
 			remoteInfo = garglkmain;
 		};
+		C373921B27A2F0E1009147EF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C392C385275A1022003109E6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C321E4D9275CB6C600230208;
+			remoteInfo = garglkmain;
+		};
+		C373922027A2F0E4009147EF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C392C385275A1022003109E6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C321E4D1275CB6B500230208;
+			remoteInfo = garglk;
+		};
 		C3979A61275E8E5D0079F10D /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = C392C385275A1022003109E6 /* Project object */;
@@ -170,15 +205,26 @@
 			name = "Embed Libraries";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		C321E501275CBA4D00230208 /* Embed Libraries */ = {
+		C37391DF27A2EE88009147EF /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 8;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+		C373921D27A2F0E1009147EF /* Embed Libraries */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
+				C373921F27A2F0E4009147EF /* libgarglk.dylib in Embed Libraries */,
+				C373921A27A2F0E1009147EF /* glkmain.dylib in Embed Libraries */,
 			);
 			name = "Embed Libraries";
-			runOnlyForDeploymentPostprocessing = 1;
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		C397925F275E77050079F10D /* Copy Interpreter Files */ = {
 			isa = PBXCopyFilesBuildPhase;
@@ -186,6 +232,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
+				C373922527A2F2AA009147EF /* scott in Copy Interpreter Files */,
 				C3979A68275E8E8E0079F10D /* bocfel in Copy Interpreter Files */,
 				C3979A1E275E8A4D0079F10D /* git in Copy Interpreter Files */,
 				C39799F5275E869A0079F10D /* glulxe in Copy Interpreter Files */,
@@ -241,6 +288,43 @@
 		C321E431275CB0E800230208 /* OpenCL.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = OpenCL.framework; path = System/Library/Frameworks/OpenCL.framework; sourceTree = SDKROOT; };
 		C321E4D2275CB6B500230208 /* libgarglk.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libgarglk.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
 		C321E4DA275CB6C600230208 /* glkmain.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = glkmain.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
+		C37391E127A2EE88009147EF /* scott */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = scott; sourceTree = BUILT_PRODUCTS_DIR; };
+		C37391E327A2EE88009147EF /* main.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = main.c; sourceTree = "<group>"; };
+		C37391E827A2EEAA009147EF /* gremlins.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = gremlins.c; sourceTree = "<group>"; };
+		C37391E927A2EEAA009147EF /* bsd.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = bsd.h; sourceTree = "<group>"; };
+		C37391EA27A2EEAA009147EF /* detectgame.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = detectgame.h; sourceTree = "<group>"; };
+		C37391EB27A2EEAA009147EF /* layouttext.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = layouttext.c; sourceTree = "<group>"; };
+		C37391EC27A2EEAA009147EF /* decompressz80.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = decompressz80.h; sourceTree = "<group>"; };
+		C37391ED27A2EEAA009147EF /* parser.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = parser.h; sourceTree = "<group>"; };
+		C37391EE27A2EEAA009147EF /* scott.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = scott.c; sourceTree = "<group>"; };
+		C37391EF27A2EEAA009147EF /* seasofblood.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = seasofblood.h; sourceTree = "<group>"; };
+		C37391F027A2EEAA009147EF /* restorestate.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = restorestate.c; sourceTree = "<group>"; };
+		C37391F127A2EEAA009147EF /* debug.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = debug.c; sourceTree = "<group>"; };
+		C37391F227A2EEAB009147EF /* hulk.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = hulk.h; sourceTree = "<group>"; };
+		C37391F327A2EEAB009147EF /* definitions.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = definitions.h; sourceTree = "<group>"; };
+		C37391F427A2EEAB009147EF /* hulk.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = hulk.c; sourceTree = "<group>"; };
+		C37391F527A2EEAB009147EF /* restorestate.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = restorestate.h; sourceTree = "<group>"; };
+		C37391F627A2EEAB009147EF /* game_specific.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = game_specific.c; sourceTree = "<group>"; };
+		C37391F727A2EEAB009147EF /* debug.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = debug.h; sourceTree = "<group>"; };
+		C37391F827A2EEAB009147EF /* game_specific.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = game_specific.h; sourceTree = "<group>"; };
+		C37391F927A2EEAB009147EF /* decompressz80.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = decompressz80.c; sourceTree = "<group>"; };
+		C37391FA27A2EEAB009147EF /* sagadraw.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = sagadraw.c; sourceTree = "<group>"; };
+		C37391FB27A2EEAB009147EF /* seasofblood.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = seasofblood.c; sourceTree = "<group>"; };
+		C37391FC27A2EEAB009147EF /* gremlins.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = gremlins.h; sourceTree = "<group>"; };
+		C37391FD27A2EEAC009147EF /* gameinfo.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = gameinfo.h; sourceTree = "<group>"; };
+		C37391FE27A2EEAC009147EF /* scott.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = scott.h; sourceTree = "<group>"; };
+		C37391FF27A2EEAC009147EF /* README */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = README; sourceTree = "<group>"; };
+		C373920027A2EEAC009147EF /* sagadraw.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = sagadraw.h; sourceTree = "<group>"; };
+		C373920127A2EEAC009147EF /* Definition.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = Definition.txt; sourceTree = "<group>"; };
+		C373920227A2EEAC009147EF /* detectgame.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = detectgame.c; sourceTree = "<group>"; };
+		C373920327A2EEAC009147EF /* decompresstext.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = decompresstext.c; sourceTree = "<group>"; };
+		C373920427A2EEAC009147EF /* decompresstext.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = decompresstext.h; sourceTree = "<group>"; };
+		C373920527A2EEAC009147EF /* parser.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = parser.c; sourceTree = "<group>"; };
+		C373920627A2EEAC009147EF /* bsd.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = bsd.c; sourceTree = "<group>"; };
+		C373920727A2EEAC009147EF /* robinofsherwood.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = robinofsherwood.c; sourceTree = "<group>"; };
+		C373920827A2EEAC009147EF /* layouttext.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = layouttext.h; sourceTree = "<group>"; };
+		C373920927A2EEAD009147EF /* robinofsherwood.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = robinofsherwood.h; sourceTree = "<group>"; };
+		C373922227A2F1D9009147EF /* libSDL2_mixer-2.0.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libSDL2_mixer-2.0.0.dylib"; path = "../../../../../opt/homebrew/lib/libSDL2_mixer-2.0.0.dylib"; sourceTree = "<group>"; };
 		C392C38D275A1022003109E6 /* Gargoyle.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Gargoyle.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C392C39A275A1023003109E6 /* Gargoyle.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Gargoyle.entitlements; sourceTree = "<group>"; };
 		C392C3A1275A1088003109E6 /* garversion.h.in */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = garversion.h.in; sourceTree = "<group>"; };
@@ -418,11 +502,6 @@
 		C39792E5275E85050079F10D /* heglk.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = heglk.c; sourceTree = "<group>"; };
 		C39792E6275E85050079F10D /* hemedia.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = hemedia.c; sourceTree = "<group>"; };
 		C39792E7275E85050079F10D /* LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE.txt; sourceTree = "<group>"; };
-		C39792E9275E85050079F10D /* scott.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = scott.c; sourceTree = "<group>"; };
-		C39792EA275E85050079F10D /* bsd.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bsd.h; sourceTree = "<group>"; };
-		C39792EB275E85050079F10D /* README */ = {isa = PBXFileReference; lastKnownFileType = text; path = README; sourceTree = "<group>"; };
-		C39792EC275E85050079F10D /* scott.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = scott.h; sourceTree = "<group>"; };
-		C39792ED275E85050079F10D /* bsd.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = bsd.c; sourceTree = "<group>"; };
 		C39792EF275E85050079F10D /* reverse.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = reverse.h; sourceTree = "<group>"; };
 		C39792F0275E85050079F10D /* compatibility.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = compatibility.h; sourceTree = "<group>"; };
 		C39792F1275E85050079F10D /* dictionary.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = dictionary.c; sourceTree = "<group>"; };
@@ -2185,6 +2264,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C373922327A2F1D9009147EF /* libSDL2_mixer-2.0.0.dylib in Frameworks */,
 				C3E4EBED275E9C2600D24ECE /* Cocoa.framework in Frameworks */,
 				C3E4EBEC275E9C0300D24ECE /* libSDL2_mixer-2.0.0.dylib in Frameworks */,
 				C3E4EBEA275E9BF100D24ECE /* libSDL2-2.0.0.dylib in Frameworks */,
@@ -2198,6 +2278,15 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C37391DE27A2EE88009147EF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C373921E27A2F0E4009147EF /* libgarglk.dylib in Frameworks */,
+				C373921927A2F0E1009147EF /* glkmain.dylib in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2246,6 +2335,7 @@
 			isa = PBXGroup;
 			children = (
 				C3E4EBEB275E9C0300D24ECE /* libSDL2_mixer-2.0.0.dylib */,
+				C373922227A2F1D9009147EF /* libSDL2_mixer-2.0.0.dylib */,
 				C3E4EBE9275E9BF100D24ECE /* libSDL2-2.0.0.dylib */,
 				C3E4EBE7275E9BCD00D24ECE /* libpng16.16.dylib */,
 				C3E4EBE5275E9BB000D24ECE /* libjpeg.9.dylib */,
@@ -2257,10 +2347,19 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
+		C37391E227A2EE88009147EF /* scott */ = {
+			isa = PBXGroup;
+			children = (
+				C37391E327A2EE88009147EF /* main.c */,
+			);
+			path = scott;
+			sourceTree = "<group>";
+		};
 		C392C384275A1022003109E6 = {
 			isa = PBXGroup;
 			children = (
 				C392C38F275A1022003109E6 /* Gargoyle */,
+				C37391E227A2EE88009147EF /* scott */,
 				C392C38E275A1022003109E6 /* Products */,
 				C321E411275CAC7100230208 /* Frameworks */,
 			);
@@ -2275,6 +2374,7 @@
 				C397926C275E83270079F10D /* glulxe */,
 				C39799FA275E88D20079F10D /* git */,
 				C3979A23275E8A700079F10D /* bocfel */,
+				C37391E127A2EE88009147EF /* scott */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -2616,11 +2716,40 @@
 		C39792E8275E85050079F10D /* scott */ = {
 			isa = PBXGroup;
 			children = (
-				C39792E9275E85050079F10D /* scott.c */,
-				C39792EA275E85050079F10D /* bsd.h */,
-				C39792EB275E85050079F10D /* README */,
-				C39792EC275E85050079F10D /* scott.h */,
-				C39792ED275E85050079F10D /* bsd.c */,
+				C373920627A2EEAC009147EF /* bsd.c */,
+				C37391E927A2EEAA009147EF /* bsd.h */,
+				C37391FE27A2EEAC009147EF /* scott.h */,
+				C37391EE27A2EEAA009147EF /* scott.c */,
+				C37391F127A2EEAA009147EF /* debug.c */,
+				C37391F727A2EEAB009147EF /* debug.h */,
+				C373920327A2EEAC009147EF /* decompresstext.c */,
+				C373920427A2EEAC009147EF /* decompresstext.h */,
+				C37391F927A2EEAB009147EF /* decompressz80.c */,
+				C37391EC27A2EEAA009147EF /* decompressz80.h */,
+				C373920127A2EEAC009147EF /* Definition.txt */,
+				C37391F327A2EEAB009147EF /* definitions.h */,
+				C373920227A2EEAC009147EF /* detectgame.c */,
+				C37391EA27A2EEAA009147EF /* detectgame.h */,
+				C37391F627A2EEAB009147EF /* game_specific.c */,
+				C37391F827A2EEAB009147EF /* game_specific.h */,
+				C37391FD27A2EEAC009147EF /* gameinfo.h */,
+				C37391E827A2EEAA009147EF /* gremlins.c */,
+				C37391FC27A2EEAB009147EF /* gremlins.h */,
+				C37391F427A2EEAB009147EF /* hulk.c */,
+				C37391F227A2EEAB009147EF /* hulk.h */,
+				C37391EB27A2EEAA009147EF /* layouttext.c */,
+				C373920827A2EEAC009147EF /* layouttext.h */,
+				C373920527A2EEAC009147EF /* parser.c */,
+				C37391ED27A2EEAA009147EF /* parser.h */,
+				C37391FF27A2EEAC009147EF /* README */,
+				C37391F027A2EEAA009147EF /* restorestate.c */,
+				C37391F527A2EEAB009147EF /* restorestate.h */,
+				C373920727A2EEAC009147EF /* robinofsherwood.c */,
+				C373920927A2EEAD009147EF /* robinofsherwood.h */,
+				C37391FA27A2EEAB009147EF /* sagadraw.c */,
+				C373920027A2EEAC009147EF /* sagadraw.h */,
+				C37391FB27A2EEAB009147EF /* seasofblood.c */,
+				C37391EF27A2EEAA009147EF /* seasofblood.h */,
 			);
 			path = scott;
 			sourceTree = "<group>";
@@ -4741,7 +4870,6 @@
 				C321E4CE275CB6B500230208 /* Headers */,
 				C321E4CF275CB6B500230208 /* Sources */,
 				C321E4D0275CB6B500230208 /* Frameworks */,
-				C321E501275CBA4D00230208 /* Embed Libraries */,
 			);
 			buildRules = (
 			);
@@ -4768,6 +4896,26 @@
 			productName = garglkmain;
 			productReference = C321E4DA275CB6C600230208 /* glkmain.dylib */;
 			productType = "com.apple.product-type.library.dynamic";
+		};
+		C37391E027A2EE88009147EF /* scott */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C37391E727A2EE88009147EF /* Build configuration list for PBXNativeTarget "scott" */;
+			buildPhases = (
+				C37391DD27A2EE88009147EF /* Sources */,
+				C37391DE27A2EE88009147EF /* Frameworks */,
+				C37391DF27A2EE88009147EF /* CopyFiles */,
+				C373921D27A2F0E1009147EF /* Embed Libraries */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C373921C27A2F0E1009147EF /* PBXTargetDependency */,
+				C373922127A2F0E4009147EF /* PBXTargetDependency */,
+			);
+			name = scott;
+			productName = scott;
+			productReference = C37391E127A2EE88009147EF /* scott */;
+			productType = "com.apple.product-type.tool";
 		};
 		C392C38C275A1022003109E6 /* Gargoyle */ = {
 			isa = PBXNativeTarget;
@@ -4859,6 +5007,9 @@
 					C321E4D9275CB6C600230208 = {
 						CreatedOnToolsVersion = 13.1;
 					};
+					C37391E027A2EE88009147EF = {
+						CreatedOnToolsVersion = 13.2.1;
+					};
 					C392C38C275A1022003109E6 = {
 						CreatedOnToolsVersion = 13.1;
 					};
@@ -4892,6 +5043,7 @@
 				C397926B275E83270079F10D /* glulxe */,
 				C39799F9275E88D20079F10D /* git */,
 				C3979A22275E8A700079F10D /* bocfel */,
+				C37391E027A2EE88009147EF /* scott */,
 			);
 		};
 /* End PBXProject section */
@@ -4959,6 +5111,28 @@
 			buildActionMask = 2147483647;
 			files = (
 				C321E4DE275CB71E00230208 /* main.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C37391DD27A2EE88009147EF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C373920C27A2EEAD009147EF /* scott.c in Sources */,
+				C373921627A2EEAD009147EF /* parser.c in Sources */,
+				C373921527A2EEAD009147EF /* decompresstext.c in Sources */,
+				C373921427A2EEAD009147EF /* detectgame.c in Sources */,
+				C373920D27A2EEAD009147EF /* restorestate.c in Sources */,
+				C373920A27A2EEAD009147EF /* gremlins.c in Sources */,
+				C373921127A2EEAD009147EF /* decompressz80.c in Sources */,
+				C373920E27A2EEAD009147EF /* debug.c in Sources */,
+				C373921227A2EEAD009147EF /* sagadraw.c in Sources */,
+				C373920F27A2EEAD009147EF /* hulk.c in Sources */,
+				C373920B27A2EEAD009147EF /* layouttext.c in Sources */,
+				C373921827A2EEAD009147EF /* robinofsherwood.c in Sources */,
+				C373921727A2EEAD009147EF /* bsd.c in Sources */,
+				C373921027A2EEAD009147EF /* game_specific.c in Sources */,
+				C373921327A2EEAD009147EF /* seasofblood.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -5060,6 +5234,16 @@
 			target = C321E4D9275CB6C600230208 /* garglkmain */;
 			targetProxy = C321E4FD275CB90C00230208 /* PBXContainerItemProxy */;
 		};
+		C373921C27A2F0E1009147EF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C321E4D9275CB6C600230208 /* garglkmain */;
+			targetProxy = C373921B27A2F0E1009147EF /* PBXContainerItemProxy */;
+		};
+		C373922127A2F0E4009147EF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C321E4D1275CB6B500230208 /* garglk */;
+			targetProxy = C373922027A2F0E4009147EF /* PBXContainerItemProxy */;
+		};
 		C3979A62275E8E5D0079F10D /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = C321E4D9275CB6C600230208 /* garglkmain */;
@@ -5112,6 +5296,7 @@
 					/opt/homebrew/Cellar/libpng/1.6.37/lib,
 					/opt/homebrew/Cellar/jpeg/9d/lib,
 					"$(PROJECT_DIR)",
+					/opt/homebrew/lib,
 				);
 				MACOSX_DEPLOYMENT_TARGET = 10.9;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -5148,6 +5333,7 @@
 					/opt/homebrew/Cellar/libpng/1.6.37/lib,
 					/opt/homebrew/Cellar/jpeg/9d/lib,
 					"$(PROJECT_DIR)",
+					/opt/homebrew/lib,
 				);
 				MACOSX_DEPLOYMENT_TARGET = 10.9;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -5195,6 +5381,34 @@
 				);
 				PRODUCT_NAME = glkmain;
 				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		C37391E527A2EE88009147EF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_STYLE = Automatic;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 12.1;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		C37391E627A2EE88009147EF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_STYLE = Automatic;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				MACOSX_DEPLOYMENT_TARGET = 12.1;
+				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
 		};
@@ -5252,6 +5466,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				HEADER_SEARCH_PATHS = "";
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSMainNibFile = MainMenu.xib;
 				MACOSX_DEPLOYMENT_TARGET = 10.9;
@@ -5310,6 +5525,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				HEADER_SEARCH_PATHS = "";
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSMainNibFile = MainMenu.xib;
 				MACOSX_DEPLOYMENT_TARGET = 10.9;
@@ -5557,6 +5773,15 @@
 			buildConfigurations = (
 				C321E4DC275CB6C600230208 /* Debug */,
 				C321E4DD275CB6C600230208 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C37391E727A2EE88009147EF /* Build configuration list for PBXNativeTarget "scott" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C37391E527A2EE88009147EF /* Debug */,
+				C37391E627A2EE88009147EF /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
