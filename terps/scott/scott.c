@@ -167,8 +167,6 @@ void Display(winid_t w, const char *fmt, ...)
     if (w != Bottom)
         lastwasnewline = oldlastwasnewline;
     glk_put_string_stream_uni(glk_window_get_stream(w), unistring);
-    if (Transcript && w == Bottom)
-        glk_put_string_stream_uni(Transcript, unistring);
     free(unistring);
 }
 
@@ -1327,6 +1325,7 @@ static void TranscriptOn(void)
     free(start_of_transcript);
     glk_put_string_stream(glk_window_get_stream(Bottom),
         (char *)sys[TRANSCRIPT_ON]);
+    glk_window_set_echo_stream(Bottom, Transcript);
 }
 
 static void TranscriptOff(void)
@@ -1335,6 +1334,8 @@ static void TranscriptOff(void)
         Output(sys[NO_TRANSCRIPT]);
         return;
     }
+
+    glk_window_set_echo_stream(Bottom, NULL);
 
     glui32 *end_of_transcript = ToUnicode(sys[TRANSCRIPT_END]);
     glk_put_string_stream_uni(Transcript, end_of_transcript);
@@ -1493,8 +1494,6 @@ static void WriteToLowerWindow(const char *fmt, ...)
 
     glui32 *unistring = ToUnicode(msg);
     glk_put_string_stream_uni(glk_window_get_stream(Bottom), unistring);
-    if (Transcript)
-        glk_put_string_stream_uni(Transcript, unistring);
     free(unistring);
 }
 
