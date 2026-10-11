@@ -384,7 +384,7 @@ endif()
 
 # ------------------------------------------------------------------------------
 #
-# SCARIER (from Spatterlight 1.5.4) for Adrift 4 and 5 games
+# SCARIER (from Spatterlight git 3ed4333d6) for Adrift 4 and 5 games
 #
 if(WITH_SCARIER)
     find_package(ZLIB REQUIRED)
@@ -418,27 +418,121 @@ int main()
     set(CMAKE_CXX_EXTENSIONS "${_scarier_saved_extensions}")
 
     terp(scarier
-        SRCS scarier/adrift5/a5blorb.cpp scarier/adrift5/a5deobf.cpp
-        scarier/adrift5/a5expr.cpp scarier/adrift5/a5map.cpp
-        scarier/adrift5/a5model.cpp scarier/adrift5/a5parse.cpp
-        scarier/adrift5/a5rand.cpp scarier/adrift5/a5restr.cpp
-        scarier/adrift5/a5run.cpp scarier/adrift5/a5run_action.cpp
-        scarier/adrift5/a5run_conv.cpp scarier/adrift5/a5run_events.cpp
-        scarier/adrift5/a5run_ref.cpp scarier/adrift5/a5run_resp.cpp
-        scarier/adrift5/a5run_sort.cpp scarier/adrift5/a5sb.cpp
-        scarier/adrift5/a5sexpr.cpp scarier/adrift5/a5state.cpp
-        scarier/adrift5/a5text.cpp scarier/adrift5/a5xml.cpp
-        scarier/mapdraw.cpp scarier/os_glk.cpp
-        scarier/scbattle.cpp scarier/scdebug.cpp scarier/scevents.cpp
-        scarier/scexpr.cpp scarier/scgamest.cpp scarier/scinterf.cpp
-        scarier/sclibrar.cpp scarier/sclocale.cpp scarier/scmap.cpp
-        scarier/scmemos.cpp scarier/scnpcs.cpp scarier/scobjcts.cpp
-        scarier/scparser.cpp scarier/scprintf.cpp scarier/scprops.cpp
-        scarier/scresour.cpp scarier/screstrs.cpp scarier/scrunner.cpp
-        scarier/scserial.cpp scarier/sctaffil.cpp scarier/sctafpar.cpp
-        scarier/sctasks.cpp scarier/scutils.cpp scarier/scvars.cpp
-        scarier/common_utils/randomness.c scarier/common_utils/sc_garglk.c
-        INCLUDE_DIRS ${ZLIB_INCLUDE_DIRS}
+        SRCS
+        scarier/adrift5/a5blorb.cpp
+        scarier/adrift5/a5deobf.cpp
+        scarier/adrift5/a5expr.cpp
+        scarier/adrift5/a5map.cpp
+        scarier/adrift5/a5model.cpp
+        scarier/adrift5/a5parse.cpp
+        scarier/adrift5/a5rand.cpp
+        scarier/adrift5/a5restr.cpp
+        scarier/adrift5/a5sb.cpp
+        scarier/adrift5/a5sexpr.cpp
+        scarier/adrift5/a5state.cpp
+        scarier/adrift5/a5xml.cpp
+        scarier/adrift5/run/a5run_act.cpp
+        scarier/adrift5/run/a5run_action.cpp
+        scarier/adrift5/run/a5run_conv.cpp
+        scarier/adrift5/run/a5run_events.cpp
+        scarier/adrift5/run/a5run_ref.cpp
+        scarier/adrift5/run/a5run_resp.cpp
+        scarier/adrift5/run/a5run_save.cpp
+        scarier/adrift5/run/a5run_sort.cpp
+        scarier/adrift5/run/a5run_words.cpp
+        scarier/adrift5/run/a5run.cpp
+        scarier/adrift5/text/a5text_func.cpp
+        scarier/adrift5/text/a5text_name.cpp
+        scarier/adrift5/text/a5text_render.cpp
+        scarier/adrift5/text/a5text_view.cpp
+        scarier/adrift5/text/a5text.cpp
+        scarier/core/scbattle.cpp
+        scarier/core/scdebug.cpp
+        scarier/core/scevents.cpp
+        scarier/core/scexpr.cpp
+        scarier/core/scgamest.cpp
+        scarier/core/scinterf.cpp
+        scarier/core/sclocale.cpp
+        scarier/core/scmap.cpp
+        scarier/core/scmemos.cpp
+        scarier/core/scnpcs.cpp
+        scarier/core/scobjcts.cpp
+        scarier/core/scparser_entity.cpp
+        scarier/core/scparser_match.cpp
+        scarier/core/scparser_pattern.cpp
+        scarier/core/scparser_pronoun.cpp
+        scarier/core/scparser.cpp
+        scarier/core/scprintf_alr.cpp
+        scarier/core/scprintf_buffer.cpp
+        scarier/core/scprintf_input.cpp
+        scarier/core/scprintf_output.cpp
+        scarier/core/scprintf.cpp
+        scarier/core/scprops.cpp
+        scarier/core/scresour.cpp
+        scarier/core/screstrs.cpp
+        scarier/core/scserial.cpp
+        scarier/core/sctaffil.cpp
+        scarier/core/sctafpar_fixups.cpp
+        scarier/core/sctafpar_patches.cpp
+        scarier/core/sctafpar.cpp
+        scarier/core/sctasks_action.cpp
+        scarier/core/sctasks_endgame.cpp
+        scarier/core/sctasks_move.cpp
+        scarier/core/sctasks_run.cpp
+        scarier/core/sctasks.cpp
+        scarier/core/scutils.cpp
+        scarier/core/scvars.cpp
+        scarier/glk/os_glk_a5_display.cpp
+        scarier/glk/os_glk_a5.cpp
+        scarier/glk/os_glk_autosave.cpp
+        scarier/glk/os_glk_commands.cpp
+        scarier/glk/os_glk_input.cpp
+        scarier/glk/os_glk_locale.cpp
+        scarier/glk/os_glk_map.cpp
+        scarier/glk/os_glk_output.cpp
+        scarier/glk/os_glk_platform.cpp
+        scarier/glk/os_glk_resources.cpp
+        scarier/glk/os_glk_status.cpp
+        scarier/glk/os_glk_symbols.cpp
+        scarier/glk/os_glk.cpp
+        scarier/library/sclibrar_battle.cpp
+        scarier/library/sclibrar_disambig_400.cpp
+        scarier/library/sclibrar_disambig_scan.cpp
+        scarier/library/sclibrar_disambig.cpp
+        scarier/library/sclibrar_dispatch.cpp
+        scarier/library/sclibrar_drop.cpp
+        scarier/library/sclibrar_examine.cpp
+        scarier/library/sclibrar_go.cpp
+        scarier/library/sclibrar_meta.cpp
+        scarier/library/sclibrar_misc.cpp
+        scarier/library/sclibrar_open.cpp
+        scarier/library/sclibrar_print.cpp
+        scarier/library/sclibrar_put_multiple.cpp
+        scarier/library/sclibrar_put.cpp
+        scarier/library/sclibrar_read.cpp
+        scarier/library/sclibrar_refuse.cpp
+        scarier/library/sclibrar_room.cpp
+        scarier/library/sclibrar_sitstand.cpp
+        scarier/library/sclibrar_take_multiple.cpp
+        scarier/library/sclibrar_take.cpp
+        scarier/library/sclibrar_takefrom.cpp
+        scarier/library/sclibrar_talk.cpp
+        scarier/library/sclibrar_topic.cpp
+        scarier/library/sclibrar_verbobj.cpp
+        scarier/library/sclibrar_verbs.cpp
+        scarier/mapdraw.cpp
+        scarier/runner/scrun_dispatch.cpp
+        scarier/runner/scrun_input.cpp
+        scarier/runner/scrun_match_refusal.cpp
+        scarier/runner/scrun_match_run.cpp
+        scarier/runner/scrun_match.cpp
+        scarier/runner/scrun_respell.cpp
+        scarier/runner/scrun_split.cpp
+        scarier/runner/scrun_tables.cpp
+        scarier/runner/scrunner.cpp
+        scarier/common_utils/randomness.c
+        scarier/common_utils/sc_garglk.c
+        INCLUDE_DIRS scarier ${ZLIB_INCLUDE_DIRS}
         LIBS ${ZLIB_LIBRARIES}
         CXXSTD 17)
 

@@ -1,24 +1,27 @@
 # ADRIFT 4 vs ADRIFT 5 in Scarier
 
 How the two engines Scarier carries differ, subsystem by subsystem. Semantics
-*arbitrated against the real Runners* live in `RUNNER_TESTS_TODO.md` §4; this
+*arbitrated against the real Runners* live in `test/adrift4/notes/RUNNER_TESTS_TODO.md` §4; this
 file describes the code as it stands. Last checked against the sources
 2026-08-10.
 
-**Where the files are.** The ADRIFT ≤4 engine (`sc*.cpp`, the SCARE lineage) and
-the Glk host (`os_glk.cpp`) sit at the top of `terps/scarier/`. **Every `a5*`
-file named below lives in `terps/scarier/adrift5/`.** `a5run.cpp` has since been
-split: `a5run_action.cpp` (task/action execution), `a5run_events.cpp` (events and
+**Where the files are.** The ADRIFT ≤4 engine (`core/sc*.cpp`, the SCARE lineage,
+with its command library in `library/` and runner in `runner/`) and
+the Glk host (`glk/os_glk*.cpp`) sit in `terps/scarier/`. **Every `a5*`
+file named below lives in `terps/scarier/adrift5/`; the `a5run*` family is in
+`adrift5/run/` and the `a5text*` family in `adrift5/text/`.** `a5run.cpp` has since been
+split: `a5run_action.cpp` (task execution), `a5run_act.cpp` (the action set), `a5run_events.cpp` (events and
 walks), `a5run_conv.cpp` (conversation), `a5run_ref.cpp` (references),
 `a5run_resp.cpp` (response aggregation), `a5run_sort.cpp` (the .NET introsort for
-Specific overrides), with the shared struct in `a5run_internal.h`. References to
+Specific overrides), `a5run_words.cpp` (pronouns, synonyms, NotUnderstood),
+`a5run_save.cpp` (save/restore and undo), with the shared struct in `a5run_internal.h`. References to
 "`a5run.cpp`" below mean that family.
 
 ---
 
 ## 1. Detection and Dispatch
 
-Entry point is `glk_main()` in `os_glk.cpp`. `gsc_startup_code()` tries `a5model_load()` first — it returns `NULL` cleanly on any non-v5 file. On success, `gsc_is_a5 = TRUE` and `gsc_a5_main()` is called. On failure, `scr_game_from_callback()` loads the v4 TAF and `gsc_main()` runs.
+Entry point is `glk_main()` in `glk/os_glk.cpp`. `gsc_startup_code()` tries `a5model_load()` first — it returns `NULL` cleanly on any non-v5 file. On success, `gsc_is_a5 = TRUE` and `gsc_a5_main()` is called. On failure, `scr_game_from_callback()` loads the v4 TAF and `gsc_main()` runs.
 
 The v4 path stores an opaque `scr_game_s *` handle. The v5 path stores `a5_adventure_t *gsc_a5_adv` and instantiates an `a5_run_t *` per session.
 
@@ -30,7 +33,7 @@ The v4 path stores an opaque `scr_game_s *` handle. The v5 path stores `a5_adven
 
 Four sub-versions distinguished by a 14-byte magic signature (`VERSION_HEADER_SIZE`; the four differ only in the last two bytes):
 - **v4.0**: payload is **zlib-compressed** (deflate). Embedded resources (sounds, graphics) may follow the game data; `parse_add_resources_offset()` records their byte offset.
-- **v3.9 / v3.8 / v3.7**: payload is **XOR-obfuscated** using the Visual Basic PRNG (`taf_random()`, seeded at `PRNG_INITIAL_STATE = 0x00a09e86`), with no length header and no trailer, so the plaintext may change length freely. 3.70 support was added 2026-08-04 and every inferred field was then measured against the genuine `run370.exe` (`RUNNER_TESTS_TODO.md` §6).
+- **v3.9 / v3.8 / v3.7**: payload is **XOR-obfuscated** using the Visual Basic PRNG (`taf_random()`, seeded at `PRNG_INITIAL_STATE = 0x00a09e86`), with no length header and no trailer, so the plaintext may change length freely. 3.70 support was added 2026-08-04 and every inferred field was then measured against the genuine `run370.exe` (`test/adrift4/notes/RUNNER_TESTS_TODO.md` §6).
 
 A v4.0 file is `[14-byte signature][8 ASCII digits][zlib stream][15-byte trailer]`. The digits are `filesize - 14` in decimal, and the trailer is `0x00`, twelve bytes, `CR LF`. Those twelve bytes are the author's 8-character password as `password[0:4] + "Wild" + password[4:8]` (Campbell **Wild**, ADRIFT's author), XOR-obfuscated with the *same* Visual Basic PRNG the v3.9/3.8 files use, indexed by absolute file offset — i.e. the stream is advanced `filesize - 14` times and then applied to the twelve bytes. `run400.exe` decodes it at load and rejects the file with "Error - Not an Adventure file." unless characters 5-8 are `Wild`. Scarier reads neither the size field nor the trailer, which is why it happily loads a file the Runner would refuse; anything that *writes* a `.taf` must reproduce both.
 
@@ -98,7 +101,7 @@ Two distinct layers — immutable model and mutable runtime state.
 
 ## 4. Text Engine
 
-### ADRIFT 4 (`scprintf.cpp`)
+### ADRIFT 4 (`scprintf.cpp` and `scprintf_*.cpp`)
 
 `pf_filter()` is the printfilter: expands `%variable%` and `<tag>` markup in two passes (expressions via `scexpr.cpp`, then ALR replacement via `pf_replace_alrs()`). ALRs are sorted by original-string length (longest first) and applied globally.
 
@@ -106,11 +109,11 @@ Output routes through two OS callbacks: `os_print_string()` for text and `os_pri
 
 Media is delivered as `os_play_sound(filepath, offset, length, is_looping)` and `os_show_graphic(filepath, offset, length)` — file-path plus byte offset into the TAF blob.
 
-### ADRIFT 5 (`a5text.cpp`, `a5expr.cpp`, `a5sexpr.cpp`, `a5arith.cpp`)
+### ADRIFT 5 (`a5text.cpp` and `a5text_*.cpp`, `a5expr.cpp`, `a5sexpr.cpp`)
 
 `a5text_describe(st, wrapper_node)` evaluates a `<Description>` DOM node into malloc'd UTF-8 plain text. Iterates `<SingleDescription>` elements, each gated by `<DisplayWhen>` restrictions, containing `<Text>`, `<Property>`, `<Function>`, `<If>`, and `<DisplayOnce>` one-shot segments.
 
-`%reference%` chains like `%Player.Location.ShortDescription%` are resolved by `a5expr_eval()` (`a5expr.cpp`) walking `.`-separated property/function names. Numeric expressions for variable assignments use `a5arith.cpp`. String-typed `SetToExpression` uses `a5sexpr.cpp`, supporting `len`, `left`, `right`, `mid`, `upper`, `lower`, `rand`, `urand`, `oneof`, arithmetic, comparisons, and logic operators.
+`%reference%` chains like `%Player.Location.ShortDescription%` are resolved by `a5expr_eval()` (`a5expr.cpp`) walking `.`-separated property/function names. Numeric and string `SetToExpression` assignments both go through `a5sexpr.cpp`, supporting `len`, `left`, `right`, `mid`, `upper`, `lower`, `rand`, `urand`, `oneof`, arithmetic, comparisons, and logic operators.
 
 ALR replacement runs at two levels: per-fragment inside `a5text_describe`, and at the Display boundary over the full assembled turn output (`alr_boundary_apply()`). Each ALR's `NewText` is itself a rich description block rendered recursively.
 
@@ -126,7 +129,7 @@ Media is a **side-channel**: `<img src="…">` and `<audio play|stop|pause src="
 
 ### ADRIFT 4 (`scparser.cpp`)
 
-Single-pass recursive-descent tokenizer (`uip_tokenize_start()`, `uip_next_token()`). Patterns stored as strings with `%text%`, `%object%`, `%character%`, `%number%`, `[optional]`, `{alt/choices}` grammar. Tried against the `V$Command[]` list per task. Two hardcoded built-in command tables in `scrunner.cpp` handle `take`, `drop`, `examine`, `go`, `wear`, `attack … with`, etc.: `PRIORITY_COMMANDS[]` is scanned *before* author tasks and `STANDARD_COMMANDS[]` after. The split is load-bearing, not cosmetic — it is how the Runner's rule that a completable `put`/`drop X in/on Y` beats a matched-but-failing task is reproduced (`RUNNER_TESTS_TODO.md` §4). Match is case-insensitive. Locale synonym expansion via `sclocale.cpp`.
+Single-pass recursive-descent tokenizer (`uip_tokenize_start()`, `uip_next_token()`). Patterns stored as strings with `%text%`, `%object%`, `%character%`, `%number%`, `[optional]`, `{alt/choices}` grammar. Tried against the `V$Command[]` list per task. Two hardcoded built-in command tables in `scrunner.cpp` handle `take`, `drop`, `examine`, `go`, `wear`, `attack … with`, etc.: `PRIORITY_COMMANDS[]` is scanned *before* author tasks and `STANDARD_COMMANDS[]` after. The split is load-bearing, not cosmetic — it is how the Runner's rule that a completable `put`/`drop X in/on Y` beats a matched-but-failing task is reproduced (`test/adrift4/notes/RUNNER_TESTS_TODO.md` §4). Match is case-insensitive. Locale synonym expansion via `sclocale.cpp`.
 
 ### ADRIFT 5 (`a5parse.cpp`)
 
@@ -140,13 +143,13 @@ There is **no hardcoded built-in command table**. All commands — including mov
 
 ## 6. Task / Restriction / Action System
 
-### ADRIFT 4 (`sctasks.cpp`, `screstrs.cpp`)
+### ADRIFT 4 (`sctasks*.cpp`, `screstrs.cpp`)
 
 Tasks stored in the property bundle, indexed by integer. Each task has `V$Command[]`, `$CompleteText`, `$ReverseMessage`, `V<TASK_RESTR>Restrictions[]`, `V<TASK_ACTION>Actions[]`, `$RestrMask` (a string of `A`/`O` tokens for AND/OR combining).
 
 Restriction types: **6** integer types (0 = object location, 1 = object state, 2 = task completion, 3 = character location, 4 = variable comparison, 5 = action-existence check). Each uses up to three integer `Var` fields. Type 5 checks a sentinel value (0xEC) in restriction field `[1A]` and delegates to the action-type counter — confirmed in `run400.exe` Sub_20_3 at the type-5 dispatch branch.
 
-Action types: the executor (`Sub_20_11` in the original Runner, `sctasks.cpp` in Scarier) handles **8** types (0–7). The data model and action type-counter (`Sub_20_13`) recognise **10** types (0–9); types 8 and 9 are parsed and counted but the executor silently ignores them. Type 4 handles both score changes and end-game (confirmed by `"(Your score has increased by "` / `"(Your score has decreased by "` string literals in the type-4 block).
+Action types: the executor (`Sub_20_11` in the original Runner, `sctasks_action.cpp` in Scarier) handles **8** types (0–7). The data model and the action type-counter recognise **10** types (0–9); types 8 and 9 are parsed and counted but the executor silently ignores them. (The counter used to be cited here as `Sub_20_13`; that name resolves to `453278`, which is the Runner's "nth object of a class" helper — its ten *class* branches are what was read as ten action types — so the counter itself is unlocated. The 10-vs-8 split stands on the data model.) Type 4 handles both score changes and end-game (confirmed by `"(Your score has increased by "` / `"(Your score has decreased by "` string literals in the type-4 block).
 
 | Type | Meaning |
 |------|---------|
