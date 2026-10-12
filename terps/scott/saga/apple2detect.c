@@ -783,7 +783,7 @@ GameIDType DetectApple2(uint8_t **sf, size_t *extent)
     if (*extent > MAX_LENGTH || *extent < kDiskImageSize)
         return UNKNOWN_GAME;
 
-    if ((*sf)[0] == 'W' && (*sf)[1] == 'O' && (*sf)[2] == 'Z') {
+    if (is_woz_image(*sf, *extent)) {
         uint8_t *result = woz2nib(*sf, extent);
         if (result) {
             free(*sf);
@@ -801,15 +801,22 @@ GameIDType DetectApple2(uint8_t **sf, size_t *extent)
     size_t companionsize;
     uint8_t *companionfile = GetApple2CompanionFile(&companionsize, &isnib);
 
-    uint8_t *datafile = ReadApple2DOSFile(*sf, extent, &invimg, &invimgsiz, &m2, &m3, &m3len);
+    /* ReadApple2DOSFile() replaces the size of the disk with that of the
+       database, and we need both. */
+    size_t disksize = *extent;
+    size_t datasize = disksize;
+    uint8_t *datafile = ReadApple2DOSFile(*sf, &datasize, &invimg, &invimgsiz, &m2, &m3, &m3len);
 
     if (!datafile && companionfile != NULL) {
         FreeDiskImage();
         InitA2DiskImage(companionfile, companionsize, isnib);
-        datafile = ReadApple2DOSFile(companionfile, &companionsize, &invimg, &invimgsiz, &m2, &m3, &m3len);
+        datasize = companionsize;
+        datafile = ReadApple2DOSFile(companionfile, &datasize, &invimg, &invimgsiz, &m2, &m3, &m3len);
         if (datafile)
-            SwapWithCompanionFile(sf, extent, &companionfile, &companionsize);
+            SwapWithCompanionFile(sf, &disksize, &companionfile, &companionsize);
     }
+    if (datafile)
+        *extent = datasize;
 
     FreeDiskImage();
 
@@ -848,7 +855,7 @@ GameIDType DetectApple2(uint8_t **sf, size_t *extent)
     GameIDType result = LoadApple2Database(database, newlength);
 
     if (result != UNKNOWN_GAME) {
-        SetUpApple2Images(datafile, companionfile, companionsize, isnib, *sf, *extent);
+        SetUpApple2Images(datafile, companionfile, companionsize, isnib, *sf, disksize);
     } else {
         free(companionfile);
         debug_print("Failed loading database\n");
@@ -861,7 +868,7 @@ GameIDType DetectApple2(uint8_t **sf, size_t *extent)
 static uint8_t *ReadA2DiskImageFile(const char *filename, size_t *filesize, int *isnib)
 {
     uint8_t *result = ReadFileIfExists(filename, filesize);
-    if (result && *filesize > 4 && result[0] == 'W' && result[1] == 'O' && result[2] == 'Z') {
+    if (result && is_woz_image(result, *filesize)) {
         uint8_t *result2 = woz2nib(result, filesize);
         if (result2) {
             free(result);
