@@ -2733,7 +2733,8 @@ A2FileRec *GetAllApple2DOSFiles(uint8_t *data, size_t len, size_t *number_of_fil
     while (file) {
         Open(file);
         if (file->fLengthInSectors) {
-            size_t namelen = strnlen((char *)file->fFileName, kFileNameBufLen) + 1;
+            const char *nameend = memchr(file->fFileName, 0, kFileNameBufLen);
+            size_t namelen = (nameend ? (size_t)(nameend - (const char *)file->fFileName) : kFileNameBufLen) + 1;
             if (namelen) {
                 filecount++;
                 if (filecount > 1) {
