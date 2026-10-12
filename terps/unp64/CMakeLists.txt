@@ -1,5 +1,5 @@
-add_library(unp64 STATIC 6502_emu.cpp exo_util.cpp globals.cpp unp64.cpp
-    scanners/scanners.cpp scanners/abuze_crunch.cpp scanners/action_packer.cpp
+add_library(unp64 STATIC 6502_emu.cpp exo_util.cpp unp64.cpp
+    scanners/scanners.cpp scanners/abuze_crunch.cpp scanners/ar.cpp scanners/action_packer.cpp
     scanners/byte_boiler.cpp scanners/caution.cpp scanners/ccs.cpp scanners/cruel.cpp
     scanners/eca.cpp scanners/exomizer.cpp scanners/expert.cpp scanners/final_super_comp.cpp
     scanners/intros.cpp scanners/master_compressor.cpp scanners/megabyte.cpp scanners/mr_cross.cpp

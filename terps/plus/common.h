@@ -8,15 +8,17 @@
 #ifndef common_h
 #define common_h
 
+#include "common_utils.h"
+#include "common_file_utils.h"
+#include "debugprint.h"
 #include "definitions.h"
+#include "memory_allocation.h"
+
 #include "glk.h"
 
-void *MemAlloc(size_t size);
-void Fatal(const char *x);
 void Output(const char *string);
 void OpenGraphicsWindow(void);
 void CloseGraphicsWindow(void);
-void PrintDictWord(int idx, DictWord *dict);
 void Updates(event_t ev);
 void Display(winid_t w, const char *fmt, ...)
 #ifdef __GNUC__
@@ -27,8 +29,9 @@ void Display(winid_t w, const char *fmt, ...)
 void SetBit(int bit);
 void ResetBit(int bit);
 int IsSet(int bit);
+int IsDark(void);
 
-int CompareUpToHashSign(char *word1, char *word2);
+int CompareUpToHashSign(const char *word1, const char *word2);
 int GetDictWord(int group);
 int YesOrNo(void);
 void OpenTopWindow(void);
@@ -73,7 +76,7 @@ extern int lastwasnewline;
 extern int should_restart;
 
 extern SystemType CurrentSys;
-extern struct GameInfo *Game;
+extern const GameInfo *Game;
 
 extern ImgType LastImgType;
 extern int LastImgIndex;
@@ -85,7 +88,6 @@ extern int CurrentVerb, CurrentNoun, CurrentPrep, CurrentPartp, CurrentNoun2, Cu
 
 extern int showing_inventory;
 
-extern uint16_t header[];
 extern uint8_t *mem;
 extern size_t memlen;
 

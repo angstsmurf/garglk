@@ -8,16 +8,17 @@
 #include <stdio.h>
 
 #include "definitions.h"
+#include "gameinfo.h"
 
-const struct GameInfo games[] = {
+const GameInfo games[] = {
     {
         "Buckaroo Banzai",
         "BUCKAROO",
         BANZAI,
 
-        27, // no room images
-        24, // no item images
-        20, // no special images
+        27, // room images
+        24, // item images
+        20, // special images
     },
 
     {
@@ -50,14 +51,16 @@ const struct GameInfo games[] = {
         21, // special images
     },
 
+    /* The unfinished X-Men survives as an MS-DOS database (SPL54.DAT)
+       with no pictures: a maze to explore but no way to win. */
     {
         "Questprobe 4: X-Men (Unfinished)",
         "X-MEN ",
         XMEN, // game ID
 
-        0, // room images
-        0, // item images
-        0, // special images
+        0, // no room images
+        0, // no item images
+        0, // no special images
     },
 
     { NULL }
@@ -136,7 +139,8 @@ const char *sysdict[MAX_SYSMESS] = {
     "BAD DATA! Invalid save file. ",
     "State saved. ",
     "State restored. ",
-    "No saved state exists. "
+    "No saved state exists. ",
+    "No previous action exists. "
 };
 
 /* These are supposed to be the original ScottFree system

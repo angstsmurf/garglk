@@ -8,8 +8,12 @@
 #ifndef restorestate_h
 #define restorestate_h
 
-struct SavedState {
-    uint16_t Counters[64];
+#include <stdint.h>
+
+#include "definitions.h"
+
+typedef struct SavedState {
+    int16_t Counters[NUM_COUNTERS];
     uint8_t ObjectLocations[256];
     uint64_t BitFlags;
     int ProtagonistString;
@@ -17,21 +21,26 @@ struct SavedState {
     int LastImgIndex;
     struct SavedState *previousState;
     struct SavedState *nextState;
-};
+} SavedState;
 
-extern struct SavedState *InitialState;
+extern SavedState *InitialState;
 
 extern ImgType SavedImgType;
 extern int SavedImgIndex;
+
+/* Set after a saved game was loaded from file, until the next turn */
 extern int JustRestored;
+/* JustRestarted is only used to adjust newlines and room descriptions in the transcript */
+extern int JustRestarted;
+/* JustStarted is only used for the error message "Can't undo on first move" */
+extern int JustStarted;
 
 void SaveUndo(void);
 void RestoreUndo(int game);
 void RamSave(int game);
 void RamLoad(void);
-struct SavedState *SaveCurrentState(void);
-void RestoreState(struct SavedState *state);
-void RecoverFromBadRestore(struct SavedState *state);
+SavedState *SaveCurrentState(void);
+void RestoreState(SavedState *state);
 int LoadGame(void);
 void SaveGame(void);
 void RestartGame(void);

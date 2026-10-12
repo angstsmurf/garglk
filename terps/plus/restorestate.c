@@ -19,31 +19,23 @@
 
 #define MAX_UNDOS 100
 
-/* JustStarted is only used for the error message "Can't undo on first move" */
-extern int JustStarted;
-
-extern uint8_t Flag[];
-extern uint8_t ObjectLoc[];
-
-extern winid_t Bottom;
-
 int JustRestored = 0;
 int JustRestarted = 0;
 ImgType SavedImgType;
 int SavedImgIndex;
 
-struct SavedState *InitialState = NULL;
-static struct SavedState *ramsave = NULL;
-static struct SavedState *last_undo = NULL;
-static struct SavedState *oldest_undo = NULL;
+SavedState *InitialState = NULL;
+static SavedState *ramsave = NULL;
+static SavedState *last_undo = NULL;
+static SavedState *oldest_undo = NULL;
 
 static int number_of_undos;
 
-struct SavedState *SaveCurrentState(void)
+SavedState *SaveCurrentState(void)
 {
-    struct SavedState *s = (struct SavedState *)MemAlloc(sizeof(struct SavedState));
+    SavedState *s = (SavedState *)MemAlloc(sizeof(SavedState));
 
-    memcpy(s->Counters, Counters, 64 * sizeof(uint16_t));
+    memcpy(s->Counters, Counters, sizeof s->Counters);
     for (int i = 0; i <= GameHeader.NumItems; i++)
         s->ObjectLocations[i] = Items[i].Location;
 
@@ -58,17 +50,20 @@ struct SavedState *SaveCurrentState(void)
     return s;
 }
 
-void RecoverFromBadRestore(struct SavedState *state)
+/* Give up loading a saved game: close the file, tell the player, and go
+   back to the state we were in before we began reading it. */
+static void RecoverFromBadRestore(SavedState *state, strid_t file)
 {
+    glk_stream_close(file, NULL);
     SystemMessage(BAD_DATA);
     RestoreState(state);
     free(state);
 }
 
-void RestoreState(struct SavedState *state)
+void RestoreState(SavedState *state)
 {
     StopAnimation();
-    memcpy(Counters, state->Counters, 64 * sizeof(uint16_t));
+    memcpy(Counters, state->Counters, sizeof state->Counters);
 
     for (int i = 0; i <= GameHeader.NumItems; i++)
         Items[i].Location = state->ObjectLocations[i];
@@ -84,8 +79,8 @@ void RestoreState(struct SavedState *state)
      and we always want to reload them after restoring state.
      */
     if (CurrentGame == SPIDERMAN) {
-        ResetBit(9);
-        ResetBit(10);
+        ResetBit(SPIDERMAN_WEB_LOADED_BIT);
+        ResetBit(SPIDERMAN_SANDMAN_LOADED_BIT);
     }
     if (JustRestarted && CurrentGame != BANZAI)
         Look(0);
@@ -94,11 +89,7 @@ void RestoreState(struct SavedState *state)
     if (CurrentGame == FANTASTIC4) {
         LastImgType = state->LastImgType;
         LastImgIndex = state->LastImgIndex;
-        if (LastImgType == IMG_SPECIAL) {
-            DrawCloseup(LastImgIndex);
-        } else if (LastImgType == IMG_OBJECT) {
-            DrawItemImage(LastImgIndex);
-        }
+        DrawOverlayImage(LastImgType, LastImgIndex);
     }
 }
 
@@ -115,11 +106,11 @@ void SaveUndo(void)
         Fatal("Number of undos == 0 but last_undo != NULL!");
 
     last_undo->nextState = SaveCurrentState();
-    struct SavedState *current = last_undo->nextState;
+    SavedState *current = last_undo->nextState;
     current->previousState = last_undo;
     last_undo = current;
     if (number_of_undos == MAX_UNDOS) {
-        struct SavedState *oldest = oldest_undo;
+        SavedState *oldest = oldest_undo;
         oldest_undo = oldest_undo->nextState;
         oldest_undo->previousState = NULL;
         free(oldest);
@@ -142,7 +133,7 @@ void RestoreUndo(int game)
     if (game)
         SystemMessage(MOVE_UNDONE);
 
-    struct SavedState *current = last_undo;
+    SavedState *current = last_undo;
     last_undo = current->previousState;
     if (last_undo->previousState == NULL)
         oldest_undo = last_undo;
@@ -192,7 +183,7 @@ void SaveGame(void)
     if (file == NULL)
         return;
 
-    for (ct = 0; ct < 64; ct++) {
+    for (ct = 0; ct < NUM_COUNTERS; ct++) {
         snprintf(buf, sizeof buf, "%d\n", Counters[ct]);
         glk_put_string_stream(file, buf);
     }
@@ -226,15 +217,15 @@ int LoadGame(void)
     if (file == NULL)
         return 0;
 
-    struct SavedState *state = SaveCurrentState();
+    SavedState *state = SaveCurrentState();
 
     int result;
 
-    for (ct = 0; ct < 64; ct++) {
+    for (ct = 0; ct < NUM_COUNTERS; ct++) {
         glk_get_line_stream(file, buf, sizeof buf);
-        result = sscanf(buf, "%" SCNu16, &Counters[ct]);
+        result = sscanf(buf, "%" SCNd16, &Counters[ct]);
         if (result != 1) {
-            RecoverFromBadRestore(state);
+            RecoverFromBadRestore(state, file);
             return 0;
         }
     }
@@ -245,7 +236,7 @@ int LoadGame(void)
     SavedImgType = SavedImgTypeInt;
     debug_print("LoadGame: Result of sscanf: %d\n", result);
     if ((result < 3) || MyLoc > GameHeader.NumRooms || MyLoc < 1) {
-        RecoverFromBadRestore(state);
+        RecoverFromBadRestore(state, file);
         return 0;
     }
 
@@ -255,7 +246,7 @@ int LoadGame(void)
         Items[ct].Location = (unsigned char)lo;
         if (result != 1 || (Items[ct].Location > GameHeader.NumRooms && Items[ct].Location != CARRIED && Items[ct].Location != HIDDEN && Items[ct].Location != HELD_BY_OTHER_GUY)) {
             fprintf(stderr, "LoadGame: Unexpected item location in save game file (Item %d, %s, is in room %d)\n", ct, Items[ct].Text, Items[ct].Location);
-            RecoverFromBadRestore(state);
+            RecoverFromBadRestore(state, file);
             return 0;
         }
     }
@@ -265,9 +256,12 @@ int LoadGame(void)
     glui32 end = glk_stream_get_position(file);
     if (end != position) {
         fprintf(stderr, "LoadGame: Save game file has unexpected length (%d, expected %d)\n", end, position);
-        RecoverFromBadRestore(state);
+        RecoverFromBadRestore(state, file);
         return 0;
     }
+
+    glk_stream_close(file, NULL);
+    free(state);
 
     JustStarted = 0;
     ClearAnimationBuffer();
@@ -277,11 +271,7 @@ int LoadGame(void)
     SetBit(DRAWBIT);
     Look(0);
 
-    if (LastImgType == IMG_SPECIAL) {
-        DrawCloseup(LastImgIndex);
-    } else if (LastImgType == IMG_OBJECT) {
-        DrawItemImage(LastImgIndex);
-    }
+    DrawOverlayImage(LastImgType, LastImgIndex);
 
     SaveUndo();
     JustRestored = 1;

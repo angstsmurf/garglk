@@ -9,57 +9,28 @@
 #define taylor_h
 
 #include <stdlib.h>
-
+#include "aiukpalette.h"
 #include "glk.h"
 
-unsigned char WaitCharacter(void);
-void DisplayInit(void);
-void TopWindow(void);
-void BottomWindow(void);
-void PrintCharacter(unsigned char c);
-void DrawRoomImage(void);
-size_t FindCode(const char *x, size_t base, size_t len);
-void Updates(event_t ev);
-void DrawBlack(void);
-void WriteToRoomDescriptionStream(const char *fmt, ...)
-#ifdef __GNUC__
-    __attribute__((__format__(__printf__, 1, 2)))
-#endif
-    ;
-void CloseGraphicsWindow(void);
-void OpenGraphicsWindow(void);
-void OpenTopWindow(void);
-
-void PrintFirstTenBytes(size_t offset);
-
-#define FOLLOWS 0xffff
-
-#define MAX_WORDLENGTH 128
-#define MAX_WORDS 128
-
-#define DEBUG_ACTIONS 0
-
-#define debug_print(fmt, ...)                    \
-    do {                                         \
-        if (DEBUG_ACTIONS)                       \
-            fprintf(stderr, fmt, ##__VA_ARGS__); \
-    } while (0)
-
+/* Shortcuts for fields of the currently loaded GameInfo record. */
 #define CurrentGame (Game->gameID)
 #define Version (Game->type)
 #define BaseGame (Game->base_game)
 
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
-
+/* Runtime query for whether the Glk host can show graphics. Under
+   Spatterlight this is a user preference; elsewhere we ask Glk. */
 #ifdef SPATTERLIGHT
 #define TAYLOR_GRAPHICS_ENABLED gli_enable_graphics
 #else
 #define TAYLOR_GRAPHICS_ENABLED glk_gestalt(gestalt_Graphics, 0)
 #endif
 
+/* Named aliases for game-state flag slots. The slot numbers are baked
+   into the Taylor data format and referenced directly by action
+   opcodes, so they can't be renumbered. */
 #define MyLoc (Flag[0])
 #define OtherGuyLoc (Flag[1])
+#define CarriedLoc (Flag[2]) /* Location code of carried objects */
 #define OtherGuyInv (Flag[3])
 #define MaxCarried (Flag[4])
 #define ItemsCarried (Flag[5])
@@ -71,6 +42,48 @@ void PrintFirstTenBytes(size_t offset);
 #define DrawImages (Flag[52])
 #define Q3SwitchedWatch (Flag[126])
 
+/* Token table conventions: each byte's low 7 bits carry the character,
+   and the high bit marks the final byte of a token's expansion. */
+#define TOKEN_LAST_BYTE 0x80
+#define TOKEN_BYTE_MASK 0x7F
+
+/* First byte value treated as a token in QP3 text streams; raw bytes
+   below this are emitted as literal characters. */
+#define QP3_TOKEN_BASE 0x7b
+
+/* QP3 text-table framing: each entry ends with QP3_ENTRY_DELIM, and the
+   table itself ends with QP3_TABLE_END. */
+#define QP3_ENTRY_DELIM 0x1f
+#define QP3_TABLE_END   0x18
+
+/* QP3 object-location codes: an object can be in a room (room number) or
+   in one of these special locations. */
+#define LOC_DESTROYED   0xfc /* Object is removed from play */
+#define LOC_INV_TORCH   253  /* In Human Torch's inventory */
+#define LOC_INV_THING   254  /* In Thing's inventory */
+
+/* Message text terminators in non-QP3 versions: MSG_END ends an entry,
+ MSG_END_SPACE ends it and indicates a trailing space is pending. */
+#define MSG_END         0x7e
+#define MSG_END_SPACE   0x5e
+
+/* Action-table opcode byte layout: high bit marks an action byte (vs. a
+   condition byte); bit 6 on an action byte stops further table scanning;
+   the low 6 bits hold the opcode number. */
+#define ACTION_BIT      0x80
+#define ACTION_DONE_BIT 0x40
+#define ACTION_OP_MASK  0x3F
+
+/* Terminator byte that marks the end of a status or command action table. */
+#define ACTION_TABLE_END 0x7F
+
+/* Word code used as a wildcard in command-table verb/noun entries — matches
+   any input word. */
+#define WORD_WILDCARD    126
+
+/* All supported game variants. Each title has separate IDs for the ZX
+   Spectrum and Commodore 64 releases; Temple of Terror also has a
+   text-only/hybrid split. */
 typedef enum {
     QUESTPROBE3,
     QUESTPROBE3_64,
@@ -91,6 +104,9 @@ typedef enum {
     NUMGAMES
 } GameIDType;
 
+/* Indices into the per-game system-message table (compass directions,
+   "Inventory", "OK", "You can't go that way", etc.). Order is fixed
+   because the loader populates the table positionally. */
 typedef enum {
     YOU_SEE,
     NORTH,
@@ -152,6 +168,8 @@ typedef enum {
     LAST_SYSTEM_MESSAGE
 } SysMessageType;
 
+/* Condition opcodes from Taylor's action tables. Values match the
+   byte codes stored in the original game data and must stay in order. */
 typedef enum {
     CONDITIONERROR,
     AT,
@@ -187,6 +205,8 @@ typedef enum {
     COND31,
 } ConditionType;
 
+/* Action opcodes from Taylor's action tables. Values match the byte
+   codes stored in the original game data and must stay in order. */
 typedef enum {
     ACTIONERROR,
     LOADPROMPT,
@@ -241,6 +261,7 @@ typedef enum {
     ACT50,
 } ActionType;
 
+/* Bitfield of runtime options, mostly driven by user preferences. */
 typedef enum {
     DEBUGGING = 1, /* Info from database load */
     NO_DELAYS = 2, /* Skip all pauses */
@@ -250,13 +271,8 @@ typedef enum {
     FORCE_INVENTORY_OFF = 32 /* Inventory in upper window always off */
 } OptionsType;
 
-typedef enum { NO_PALETTE,
-    ZX,
-    ZXOPT,
-    C64A,
-    C64B,
-    VGA } palette_type;
-
+/* Coarse data-format family. Several game IDs may share one format,
+   so loader/interpreter quirks switch on this rather than on gameID. */
 typedef enum {
     NO_TYPE,
     REBEL_PLANET_TYPE,
@@ -265,7 +281,9 @@ typedef enum {
     QUESTPROBE3_TYPE
 } GameVersion;
 
-struct GameInfo {
+/* Per-game metadata: title, identity, and the file offsets the loader
+   needs to locate each table inside the raw game data. */
+typedef struct {
     const char *Title;
 
     GameIDType gameID;
@@ -284,7 +302,7 @@ struct GameInfo {
     int start_of_messages;
     int start_of_messages_2;
 
-    int start_of_characters;
+    int start_of_tiles;
     int start_of_image_blocks;
     int image_patterns_lookup;
     int number_of_patterns;
@@ -293,40 +311,15 @@ struct GameInfo {
     int number_of_pictures;
     palette_type palette;
     int start_of_intro_text;
-};
+} GameInfo;
 
-extern unsigned char ObjectLoc[];
-extern unsigned char Flag[];
+/* Registry of all supported games, indexed by GameIDType. */
+extern GameInfo games[NUMGAMES];
 
-extern winid_t Bottom, Top, Graphics, CurrentWindow;
-extern long FileBaselineOffset;
-
-extern int NumLowObjects;
-
-extern struct GameInfo *Game;
-
-extern int Resizing;
-extern char DelimiterChar;
-extern int JustWrotePeriod;
-
-extern int NoGraphics;
-extern int Options;
-extern int LineEvent;
-
-extern size_t AnimationData;
-
-extern size_t VerbBase;
-extern char LastChar;
-extern uint8_t Word[];
-extern int PendSpace;
-extern int FirstAfterInput;
-extern int LastVerb;
-
-void OutChar(char c);
-void OutString(char *p);
-void OutCaps(void);
-void OutFlush(void);
-void SysMessage(unsigned char m);
-void OpenBottomWindow(void);
+#include "actions.h"
+#include "gameload.h"
+#include "player.h"
+#include "textoutput.h"
+#include "ui.h"
 
 #endif /* taylor_h */

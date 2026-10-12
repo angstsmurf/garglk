@@ -6,12 +6,10 @@
 //
 
 #include <ctype.h>
-#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "glk.h"
 #ifdef SPATTERLIGHT
@@ -21,6 +19,7 @@
 
 #include "animations.h"
 #include "apple2detect.h"
+#include "apple2draw.h"
 #include "atari8detect.h"
 #include "c64detect.h"
 #include "common.h"
@@ -28,72 +27,74 @@
 #include "gameinfo.h"
 #include "graphics.h"
 #include "layouttext.h"
+#include "dumpactions.h"
 #include "loaddatabase.h"
 #include "parseinput.h"
+#include "randomness.h"
 #include "restorestate.h"
 #include "stdetect.h"
+#include "stdraw.h"
 
-const char *game_file = NULL;
-char *DirPath = ".";
+const char *game_file = NULL;    /* Path to the game file being played */
+char *DirPath = ".";             /* Directory containing the game file (for image lookups) */
 size_t DirPathLength = 1;
 
-uint8_t *mem;
+uint8_t *mem;                    /* Raw game file contents (for binary format detection) */
 size_t memlen;
 
-const char *sys[MAX_SYSMESS];
+const char *sys[MAX_SYSMESS];    /* System message strings (indexed by SysMessageType) */
 
-uint64_t BitFlags = 0;
-int Options; /* Option flags set */
+uint64_t BitFlags = 0;           /* 64 general-purpose bit flags used by the action table */
+static int Options;                     /* Runtime option flags (NO_DELAYS, FORCE_INVENTORY, etc.) */
 
-int split_screen = 1;
-int lastwasnewline = 1;
-int pendingcomma = 0;
-int should_restart = 0;
+static int split_screen = 1;            /* Whether to use a separate upper window for room descriptions */
+int lastwasnewline = 1;          /* Tracks whether the last output character was a newline */
+static int pendingcomma = 0;            /* A trailing comma was deferred from the last message */
+int should_restart = 0;          /* Set by DoneIt() to trigger a restart at the top of the main loop */
 
-glui32 TopWidth, TopHeight;
+static glui32 TopWidth, TopHeight;      /* Current dimensions of the status/room-description window */
 
-winid_t Bottom, Top, Graphics;
+winid_t Bottom, Top, Graphics;   /* Glk windows: main text, status bar, graphics */
 
 strid_t Transcript = NULL;
 
-struct GameInfo *Game = NULL;
+const GameInfo *Game = NULL;           /* Detected game identity and metadata */
 
-SystemType CurrentSys = SYS_UNKNOWN;
+SystemType CurrentSys = SYS_UNKNOWN; /* Detected platform (C64, Apple II, ST, Atari 8-bit) */
 
-uint16_t header[64];
 
-int16_t Counters[64]; /* Range unknown */
+int16_t Counters[NUM_COUNTERS];            /* General-purpose counter registers used by the action table */
 #define MAX_LOOPS 32
 
-int loops[MAX_LOOPS];
-int loop_index;
-int keep_going = 0;
-int startover = 0;
-int found_match = 0;
+static int loops[MAX_LOOPS];            /* Loop stack: stores action indices for loop-back commands */
+static int loop_index;                  /* Current depth in the loop stack */
+static int keep_going = 0;              /* Continue scanning the action table after a match */
+static int startover = 0;               /* Restart scanning the action table from the beginning */
+static int found_match = 0;             /* An action matched the current input */
+static int command_done = 0;            /* A matching action passed its conditions and ran */
+static int pop_at_loopback = 0;         /* Command 115: the next loop back (113) ends the loop instead */
 
 /* JustStarted is only used for the error message "Can't undo on first move" */
 int JustStarted = 1;
 
-/* JustRestarted is only used to adjust newlines and room descriptions in the transcript */
-extern int JustRestarted;
-
-int showing_inventory = 0;
+int showing_inventory = 0;       /* Non-zero while the Claymorgue inventory display is active */
 
 Header GameHeader;
 Item *Items;
 Room *Rooms;
 
-ObjectImage *ObjectImages;
-char **Messages;
-Action *Actions;
+ObjectImage *ObjectImages;       /* Mapping of objects to their image indices and rooms */
+char **Messages;                 /* Message strings referenced by action commands */
+Action *Actions;                 /* The game's action table (conditions + commands) */
 
-int ImageWidth = 280;
+int ImageWidth = 280;            /* Native image dimensions (platform-dependent) */
 int ImageHeight = 158;
 
-glui32 TimerRate = 0;
+glui32 TimerRate = 0;            /* Current Glk timer rate (ms), 0 = stopped */
 
-static char DelimiterChar = '_';
+static char DelimiterChar = '_'; /* Character used to draw the status window separator line */
 
+/* Close the transcript stream (if open) and exit via Glk. */
 GLK_ATTRIBUTE_NORETURN void CleanupAndExit(void)
 {
     if (Transcript)
@@ -101,39 +102,46 @@ GLK_ATTRIBUTE_NORETURN void CleanupAndExit(void)
     glk_exit();
 }
 
-GLK_ATTRIBUTE_NORETURN void Fatal(const char *x)
-{
-    fprintf(stderr, "%s!\n", x);
-    if (Bottom)
-        Display(Bottom, "%s\n", x);
-    CleanupAndExit();
-}
+/* Bit flag accessors. The 64-bit BitFlags word holds general-purpose
+   flags tested and set by the action table; several indices have fixed
+   meanings (e.g. DARKBIT=15, DRAWBIT=34, GRAPHICSBIT=35, STOPTIMEBIT=63).
 
-void *MemAlloc(size_t size)
+   IsValidBit() reports an out-of-range bit index on behalf of caller,
+   and returns 1 if the bit is in range. */
+static int IsValidBit(const char *caller, int bit)
 {
-    void *t = (void *)malloc(size);
-    if (t == NULL)
-        Fatal("Out of memory");
-    return (t);
+    if (bit >= 64 || bit < 0) {
+        fprintf(stderr, "%s: bit %d out of range!\n", caller, bit);
+        return 0;
+    }
+    return 1;
 }
 
 void SetBit(int bit)
 {
-    BitFlags |= (uint64_t)1 << bit;
+    if (IsValidBit("SetBit", bit))
+        BitFlags |= (uint64_t)1 << bit;
 }
 
 void ResetBit(int bit)
 {
-    BitFlags &= ~((uint64_t)1 << bit);
+    if (IsValidBit("ResetBit", bit))
+        BitFlags &= ~((uint64_t)1 << bit);
 }
 
 int IsSet(int bit)
 {
+    if (!IsValidBit("IsSet", bit))
+        return 0;
     return ((BitFlags & ((uint64_t)1 << bit)) != 0);
 }
 
+/* Memory stream used to compose room descriptions before displaying
+   them in the status window. Written to by WriteToRoomDescriptionStream(),
+   flushed by FlushRoomDescription(). */
 static strid_t room_description_stream = NULL;
 
+/* Printf-style output to a specific Glk window. */
 void Display(winid_t w, const char *fmt, ...)
 {
     va_list ap;
@@ -148,18 +156,19 @@ void Display(winid_t w, const char *fmt, ...)
     glk_put_string_stream(glk_window_get_stream(w), msg);
 }
 
-static const glui32 OptimalPictureSize(glui32 *width, glui32 *height)
+/* Calculate the largest integer scaling multiplier that fits the native
+   image dimensions into the graphics window. Returns the multiplier and
+   writes the scaled dimensions to *width and *height. */
+static glui32 OptimalPictureSize(glui32 *width, glui32 *height)
 {
     int w = ImageWidth;
     int h = ImageHeight;
 
-    *width = w;
-    *height = h;
     int multiplier = 1;
     glui32 graphwidth, graphheight;
     glk_window_get_size(Graphics, &graphwidth, &graphheight);
     multiplier = graphheight / h;
-    if (w * multiplier > graphwidth)
+    if (w * multiplier > (int)graphwidth)
         multiplier = graphwidth / w;
 
     if (multiplier == 0)
@@ -171,13 +180,42 @@ static const glui32 OptimalPictureSize(glui32 *width, glui32 *height)
     return multiplier;
 }
 
-static winid_t FindGlkWindowWithRock(glui32 rock);
+/* Pick the pixel scaling for the graphics window and centre the image
+   horizontally in it. Writes the window height and the scaled image
+   height to *graphheight and *optimal_height. */
+static void FitImageToGraphicsWindow(glui32 *graphheight, glui32 *optimal_height)
+{
+    glui32 graphwidth, optimal_width;
+    glk_window_get_size(Graphics, &graphwidth, graphheight);
+    pixel_size = OptimalPictureSize(&optimal_width, optimal_height);
+    x_offset = ((int)graphwidth - (int)optimal_width) / 2;
+    right_margin = optimal_width + x_offset;
+}
 
+/* Make the graphics window exactly height pixels tall. */
+static void SetGraphicsWindowHeight(glui32 height)
+{
+    winid_t parent = glk_window_get_parent(Graphics);
+    if (parent)
+        glk_window_set_arrangement(parent, winmethod_Above | winmethod_Fixed,
+            height, NULL);
+}
+
+static winid_t OpenGraphicsWindowAboveBottom(void)
+{
+    return glk_window_open(Bottom, winmethod_Above | winmethod_Proportional,
+        60, wintype_Graphics, GLK_GRAPHICS_ROCK);
+}
+
+/* Open (or reconfigure) the Glk graphics window above the text windows.
+   Calculates the optimal pixel scaling, centres the image horizontally,
+   and sizes the window to fit exactly. If a status window already exists
+   it is temporarily closed and reopened below the graphics window. */
 void OpenGraphicsWindow(void)
 {
     if (!IsSet(GRAPHICSBIT))
         return;
-    glui32 graphwidth, graphheight, optimal_width, optimal_height;
+    glui32 graphheight, optimal_height;
     y_offset = 0;
 
     if (Top == NULL)
@@ -187,17 +225,11 @@ void OpenGraphicsWindow(void)
     if (Graphics == NULL && Top != NULL) {
         glk_window_get_size(Top, &TopWidth, &TopHeight);
         glk_window_close(Top, NULL);
-        Graphics = glk_window_open(Bottom, winmethod_Above | winmethod_Proportional,
-            60, wintype_Graphics, GLK_GRAPHICS_ROCK);
-        glk_window_get_size(Graphics, &graphwidth, &graphheight);
-        pixel_size = OptimalPictureSize(&optimal_width, &optimal_height);
-        x_offset = ((int)graphwidth - (int)optimal_width) / 2;
+        Graphics = OpenGraphicsWindowAboveBottom();
+        FitImageToGraphicsWindow(&graphheight, &optimal_height);
 
-        if (graphheight > optimal_height) {
-            winid_t parent = glk_window_get_parent(Graphics);
-            glk_window_set_arrangement(parent, winmethod_Above | winmethod_Fixed,
-                optimal_height, NULL);
-        }
+        if (graphheight > optimal_height)
+            SetGraphicsWindowHeight(optimal_height);
 
         /* Set the graphics window background to match
          * the main window background, best as we can,
@@ -215,20 +247,13 @@ void OpenGraphicsWindow(void)
         glk_window_get_size(Top, &TopWidth, &TopHeight);
     } else {
         if (!Graphics)
-            Graphics = glk_window_open(Bottom, winmethod_Above | winmethod_Proportional, 60,
-                wintype_Graphics, GLK_GRAPHICS_ROCK);
-        glk_window_get_size(Graphics, &graphwidth, &graphheight);
-        pixel_size = OptimalPictureSize(&optimal_width, &optimal_height);
-        x_offset = (graphwidth - optimal_width) / 2;
-        winid_t parent = glk_window_get_parent(Graphics);
-        if (parent)
-            glk_window_set_arrangement(parent, winmethod_Above | winmethod_Fixed,
-                optimal_height, NULL);
+            Graphics = OpenGraphicsWindowAboveBottom();
+        FitImageToGraphicsWindow(&graphheight, &optimal_height);
+        SetGraphicsWindowHeight(optimal_height);
     }
-
-    right_margin = optimal_width + x_offset;
 }
 
+/* Close the graphics window and restore the status window dimensions. */
 void CloseGraphicsWindow(void)
 {
     if (Graphics == NULL)
@@ -236,17 +261,21 @@ void CloseGraphicsWindow(void)
     if (Graphics) {
         glk_window_close(Graphics, NULL);
         Graphics = NULL;
+        GraphicsWindowChanged();
         glk_window_get_size(Top, &TopWidth, &TopHeight);
     }
 }
 
+/* Set the Glk timer rate and record it in TimerRate. */
 void SetTimer(glui32 milliseconds)
 {
     TimerRate = milliseconds;
     glk_request_timer_events(milliseconds);
 }
 
-void UpdateSettings(void)
+/* Sync runtime options (delays, inventory display, graphics) with
+   Spatterlight's user-facing preferences. */
+static void UpdateSettings(void)
 {
 #ifdef SPATTERLIGHT
     if (gli_sa_delays)
@@ -277,24 +306,39 @@ void UpdateSettings(void)
 static void FlushRoomDescription(char *buf, int transcript);
 static void ListInventory(int upper);
 
+/* Room for the longest room description plus a long list of items or a
+   full inventory. Anything beyond this is cut off. */
+#define ROOM_DESCRIPTION_SIZE 4000
+
+/* Open room_description_stream on a new zeroed buffer, which
+   FlushRoomDescription() frees. The buffer has one byte more than the
+   stream may write, so that it always is a terminated string. */
+static char *OpenRoomDescriptionStream(void)
+{
+    char *buf = MemCalloc(ROOM_DESCRIPTION_SIZE + 1);
+    room_description_stream = glk_stream_open_memory(buf, ROOM_DESCRIPTION_SIZE, filemode_Write, 0);
+    return buf;
+}
+
+/* Claymorgue Castle displays the inventory in the upper window alongside
+   images of carried items. This renders the inventory text to a memory
+   stream, flushes it to the status window, then redraws room 33's image
+   with overlays for each carried object. */
 static void UpdateClaymorgueInventory(void)
 {
-    char *buf = MemAlloc(1000);
-    buf = memset(buf, 0, 1000);
-    room_description_stream = glk_stream_open_memory(buf, 1000, filemode_Write, 0);
+    char *buf = OpenRoomDescriptionStream();
     ListInventory(1);
     FlushRoomDescription(buf, 0);
     DrawRoomImage(33);
-    for (int ct = 0; ct <= GameHeader.NumObjImg; ct++)
-        if (ObjectImages[ct].Room == 33 && Items[ObjectImages[ct].Object].Location == CARRIED) {
-            DrawItemImage(ObjectImages[ct].Image);
-        }
+    DrawObjectImages(33, CARRIED);
 }
 
-void UpdateColorCycling(void);
+static int AnimationCounter = 0; /* Tick count for animation rate division */
 
-static int AnimationCounter = 0;
-
+/* Handle non-input Glk events: window rearrange (redraw everything) and
+   timer ticks (advance animations and colour cycling). Animation updates
+   are rate-divided so the animation timer can run faster than the frame
+   rate (e.g. when colour cycling shares the same timer). */
 void Updates(event_t ev)
 {
     if (ev.type == evtype_Arrange) {
@@ -304,19 +348,14 @@ void Updates(event_t ev)
         UpdateSettings();
         OpenGraphicsWindow();
         if (AnimationRunning && LastAnimationBackground) {
-            char buf[5];
-            snprintf(buf, sizeof buf, "S0%02d", LastAnimationBackground);
-            DrawImageWithName(buf);
+            DrawImageWithTypeAndNumber('S', LastAnimationBackground);
         } else {
             SetBit(DRAWBIT);
             if (showing_inventory == 1) {
                 UpdateClaymorgueInventory();
             } else {
                 Look(0);
-                if (SavedImgType == IMG_OBJECT)
-                    DrawItemImage(SavedImgIndex);
-                else if (SavedImgType == IMG_SPECIAL)
-                    DrawCloseup(SavedImgIndex);
+                DrawOverlayImage(SavedImgType, SavedImgIndex);
             }
         }
     } else if (ev.type == evtype_Timer) {
@@ -335,8 +374,12 @@ void Updates(event_t ev)
     }
 }
 
-static int DelayCounter = 0;
+static int DelayCounter = 0; /* Tick count for auto-dismissing AnyKey prompts */
 
+/* Wait for a keypress. If timeout is set and no animation is running,
+   auto-dismiss after ~3 seconds. Continues processing timer events
+   (animations, colour cycling) while waiting. Claymorgue disables
+   the timeout to avoid auto-advancing plot text. */
 void AnyKey(int timeout, int message)
 {
     if (message) {
@@ -390,6 +433,8 @@ void AnyKey(int timeout, int message)
     return;
 }
 
+/* Draw a line of DelimiterChar across the bottom row of the status window. */
+/* Currently, DelimiterChar is always an underscore character. */
 static void PrintWindowDelimiter(void)
 {
     glk_window_get_size(Top, &TopWidth, &TopHeight);
@@ -399,18 +444,24 @@ static void PrintWindowDelimiter(void)
         glk_put_char(DelimiterChar);
 }
 
+/* Close the room description memory stream, optionally write it to the
+   transcript, then display it. In split-screen mode, the text is word-
+   wrapped to the status window width and the window is resized to fit;
+   otherwise it goes to the lower text buffer. Frees buf when done. */
 static void FlushRoomDescription(char *buf, int transcript)
 {
     glk_stream_close(room_description_stream, 0);
+    room_description_stream = NULL;
 
     if (Transcript && transcript) {
         if (!lastwasnewline)
             glk_put_string_stream(Transcript, "\n");
         glk_put_string_stream(Transcript, "\n");
+        /* Leave out the last two characters (the line break at the end) */
         size_t buflen = strlen(buf);
-        char *roomtranscript = MemAlloc(buflen);
-        buflen -= 2;
-        strncpy(roomtranscript, buf, buflen);
+        buflen = buflen >= 2 ? buflen - 2 : 0;
+        char *roomtranscript = MemAlloc(buflen + 1);
+        memcpy(roomtranscript, buf, buflen);
         roomtranscript[buflen] = '\0';
         glk_put_string_stream(Transcript, roomtranscript);
         free(roomtranscript);
@@ -439,18 +490,16 @@ static void FlushRoomDescription(char *buf, int transcript)
         int line = 0;
         int index = 0;
         int i;
-        if (TopWidth > 2047)
-            TopWidth = 2047;
         char string[2048];
+        /* Leave room for a line break and the terminator */
+        int width = MIN(TopWidth, sizeof string - 2);
         for (line = 0; line < rows && index < length; line++) {
-            for (i = 0; i < TopWidth; i++) {
+            for (i = 0; i < width; i++) {
                 string[i] = text_with_breaks[index++];
                 if (string[i] == 10 || string[i] == 13 || index >= length)
                     break;
             }
-            if (i < TopWidth + 1) {
-                string[i++] = '\n';
-            }
+            string[i++] = '\n';
             string[i] = 0;
             if (strlen(string) == 0)
                 break;
@@ -473,12 +522,10 @@ static void FlushRoomDescription(char *buf, int transcript)
         PrintWindowDelimiter();
     }
 
-    if (buf != NULL) {
-        free(buf);
-        buf = NULL;
-    }
+    free(buf);
 }
 
+/* Printf-style output to the room description memory stream. */
 static void WriteToRoomDescriptionStream(const char *fmt, ...)
 #ifdef __GNUC__
     __attribute__((__format__(__printf__, 1, 2)))
@@ -499,6 +546,8 @@ static void WriteToRoomDescriptionStream(const char *fmt, ...)
     glk_put_string_stream(room_description_stream, msg);
 }
 
+/* Append a natural-language list of available exits to the room description
+   stream (e.g. "I see exits to the North, East, and Down."). */
 static void ListExits(void)
 {
     int ct = 0;
@@ -532,18 +581,36 @@ static void ListExits(void)
     WriteToRoomDescriptionStream(".\n");
 }
 
+/* Return "a", "an", or empty string depending on the first character. */
 static const char *IndefiniteArticle(const char *word)
 {
     char c = word[0];
-    char vowels[6] = "aiouey";
+    char vowels[11] = "aioueyAIOUE";
     if (c == ' ')
         return "\0";
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < 11; i++)
         if (vowels[i] == c)
             return " an ";
     return " a ";
 }
 
+/* The room is dark if DARKBIT is set and no light source (item flag 2)
+   is carried or in the room. */
+int IsDark(void)
+{
+    if (!IsSet(DARKBIT))
+        return 0;
+    for (int i = 0; i <= GameHeader.NumItems; i++) {
+        if ((Items[i].Flag & 2) && (Items[i].Location == MyLoc || Items[i].Location == CARRIED))
+            return 0;
+    }
+    return 1;
+}
+
+/* Compose and display the full room description: room text, visible items,
+   exit list, and optionally the inventory. Draws the room image if DRAWBIT
+   is set. The description is built in a memory stream and flushed to the
+   status window (or lower window if split_screen is off). */
 void Look(int transcript)
 {
     showing_inventory = 0;
@@ -553,22 +620,12 @@ void Look(int transcript)
         DrawCurrentRoom();
     }
 
-    char *buf = MemAlloc(1000);
-    buf = memset(buf, 0, 1000);
-    room_description_stream = glk_stream_open_memory(buf, 1000, filemode_Write, 0);
+    char *buf = OpenRoomDescriptionStream();
 
     Room *r;
     int ct;
 
-    int dark = IsSet(DARKBIT);
-    for (int i = 0; i <= GameHeader.NumItems; i++) {
-        if (Items[i].Flag & 2) {
-            if (Items[i].Location == MyLoc || Items[i].Location == CARRIED)
-                dark = 0;
-        }
-    }
-
-    if (dark) {
+    if (IsDark()) {
         WriteToRoomDescriptionStream("%s", sys[TOO_DARK_TO_SEE]);
         FlushRoomDescription(buf, transcript);
         return;
@@ -576,8 +633,13 @@ void Look(int transcript)
 
     r = &Rooms[MyLoc];
 
-    if (!r->Text)
+    if (!r->Text) {
+        /* A room without a description: nothing to show */
+        glk_stream_close(room_description_stream, 0);
+        room_description_stream = NULL;
+        free(buf);
         return;
+    }
     /* An initial asterisk means the room description should not */
     /* start with "You are" or equivalent */
     if (*r->Text == '*') {
@@ -623,6 +685,8 @@ void Output(const char *string)
     Display(Bottom, "%s", string);
 }
 
+/* Output a system message (e.g. "OK", "I don't understand"), preceded
+   by a space if we're not at the start of a line. */
 void SystemMessage(SysMessageType message)
 {
     if (!lastwasnewline)
@@ -631,18 +695,8 @@ void SystemMessage(SysMessageType message)
     Output(sys[message]);
 }
 
-static winid_t FindGlkWindowWithRock(glui32 rock)
-{
-    winid_t win;
-    glui32 rockptr;
-    for (win = glk_window_iterate(NULL, &rockptr); win;
-         win = glk_window_iterate(win, &rockptr)) {
-        if (rockptr == rock)
-            return win;
-    }
-    return 0;
-}
-
+/* Open (or find) the status/room-description text grid window. Falls
+   back to using the main text buffer if a grid window can't be created. */
 void OpenTopWindow(void)
 {
     Top = FindGlkWindowWithRock(GLK_STATUS_ROCK);
@@ -662,6 +716,7 @@ void OpenTopWindow(void)
     }
 }
 
+/* Create all three Glk windows: text buffer, status grid, and graphics. */
 static void DisplayInit(void)
 {
     Bottom = glk_window_open(0, 0, 0, wintype_TextBuffer, GLK_BUFFER_ROCK);
@@ -679,9 +734,17 @@ static void OutputNumber(int a)
     }
 }
 
-static void Delay(float seconds)
+/* Pause for the given number of milliseconds, continuing to process
+   timer events (so animations keep running). Skipped entirely if
+   NO_DELAYS is set or an animation is already running. */
+static void Delay(int milliseconds)
 {
     if (Options & NO_DELAYS || AnimationRunning)
+        return;
+
+    /* A timer rate of 0 would turn the timer off, and we would wait
+       forever for it to fire. */
+    if (milliseconds <= 0)
         return;
 
     event_t ev;
@@ -692,7 +755,7 @@ static void Delay(float seconds)
     glk_request_char_event(Bottom);
     glk_cancel_char_event(Bottom);
 
-    SetTimer(1000 * seconds);
+    SetTimer(milliseconds);
 
     do {
         glk_select(&ev);
@@ -703,16 +766,13 @@ static void Delay(float seconds)
         SetTimer(0);
 }
 
-int RandomPercent(int n)
+static int RandomPercent(int n)
 {
-    uint64_t rv = (uint64_t)rand() << 6;
-    rv &= 0xffffffff;
-    rv %= 100;
-    if (rv < n)
-        return (1);
-    return (0);
+   return (int)(erkyrath_random() % 100) < n;
 }
 
+/* Count items in a room (0 = CARRIED). Also stores the carried count
+   in Counter[33] when checking carried items. */
 static int CountItemsInRoom(int room)
 {
     int ct = 0;
@@ -725,10 +785,12 @@ static int CountItemsInRoom(int room)
         ct++;
     }
     if (room == CARRIED)
-        Counters[33] = n;
+        InventoryCount = n;
     return (n);
 }
 
+/* Find the first takeable item whose dictionary word matches 'noun' and
+   is in location 'loc' (-1 = any location). Returns 0 if not found. */
 static int MatchUpItem(int noun, int loc)
 {
     for (int i = 0; i <= GameHeader.NumItems; i++)
@@ -737,6 +799,9 @@ static int MatchUpItem(int noun, int loc)
     return (0);
 }
 
+/* Print a message from the Messages table. Handles leading backslashes
+   (suppress space), trailing commas (defer to next message), and trailing
+   single spaces (strip). Also writes to the transcript if active. */
 static void PrintMessage(int index)
 {
     if (JustRestarted && Transcript) {
@@ -770,54 +835,58 @@ static void PrintMessage(int index)
     }
 }
 
+/* Find the index of the first word in a dictionary list that belongs
+   to the given synonym group. Returns -1 if there is none. */
+static int FindDictWord(int group, DictWord *dict)
+{
+    for (int i = 0; dict[i].Word != NULL; i++) {
+        if (dict[i].Group == group) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* Print the dictionary word for the current noun (CurrentNoun), or
+   nothing if it has none. */
 static void PrintNoun(void)
 {
-    DictWord *dict = Nouns;
-    for (int i = 0; dict->Word != NULL; i++) {
-        if (dict->Group == CurrentNoun) {
-            Display(Bottom, "%s%s", lastwasnewline ? "" : " ", dict->Word);
-            lastwasnewline = 0;
-            return;
-        }
-        dict++;
-    }
+    int i = FindDictWord(CurrentNoun, Nouns);
+    if (i < 0)
+        return;
+    Display(Bottom, "%s%s", lastwasnewline ? "" : " ", Nouns[i].Word);
+    lastwasnewline = 0;
 }
 
+/* FindDictWord(), but with the first word of the list for a group that
+   has none. */
 static int GetAnyDictWord(int group, DictWord *dict)
 {
-    for (int i = 0; dict->Word != NULL; i++) {
-        if (dict->Group == group) {
-            return i;
-        }
-        dict++;
-    }
-    return 0;
+    int i = FindDictWord(group, dict);
+    return i < 0 ? 0 : i;
 }
 
+/* GetAnyDictWord() for the noun dictionary. */
 int GetDictWord(int group)
 {
-    DictWord *dict = Nouns;
-    for (int i = 0; dict->Word != NULL; i++) {
-        if (dict->Group == group) {
-            return i;
-        }
-        dict++;
-    }
-    return 0;
+    return GetAnyDictWord(group, Nouns);
 }
 
+/* Handle player death: print the death message, turn on lights, move
+   to the room in counter 35, and redraw. */
 static void PlayerIsDead(void)
 {
     debug_print("Player is dead\n");
     SystemMessage(IM_DEAD);
     ResetBit(DARKBIT);
     SetBit(DRAWBIT);
-    MyLoc = Counters[35];
-    Counters[17] = Counters[17] & 0x0f;
+    MyLoc = DeadRoom;
     Look(0);
 }
 
-void CheckForObjectImage(int obj)
+/* If the given object has a room image overlay, set DRAWBIT so the
+   room will be redrawn with the updated object state. */
+static void CheckForObjectImage(int obj)
 {
     for (int i = 0; i <= GameHeader.NumObjImg; i++)
         if (ObjectImages[i].Object == obj) {
@@ -826,8 +895,49 @@ void CheckForObjectImage(int obj)
         }
 }
 
+/* The action table of a damaged database may refer to items, rooms or
+   counters that do not exist. These report it and return 0. */
+static int IsValidItem(int item)
+{
+    if (item < 0 || item > GameHeader.NumItems) {
+        debug_print("Item %d out of range!\n", item);
+        return 0;
+    }
+    return 1;
+}
+
+static int IsValidRoom(int room)
+{
+    if (room < 0 || room > GameHeader.NumRooms) {
+        debug_print("Room %d out of range!\n", room);
+        return 0;
+    }
+    return 1;
+}
+
+static int IsValidCounter(int counter)
+{
+    if (counter < 0 || counter >= NUM_COUNTERS) {
+        debug_print("Counter %d out of range!\n", counter);
+        return 0;
+    }
+    return 1;
+}
+
+/* Move an item to a room (or to CARRIED, or out of play), and note
+   whether the room picture must be redrawn. */
+static void MoveItemTo(int item, int location)
+{
+    if (!IsValidItem(item))
+        return;
+    Items[item].Location = location;
+    CheckForObjectImage(item);
+}
+
 static void PutItemAInRoomB(int itemA, int roomB)
 {
+    if (!IsValidItem(itemA))
+        return;
     debug_print("Item %d (%s) is put in room %d. MyLoc: %d (%s)\n", itemA, Items[itemA].Text, roomB, MyLoc, Rooms[MyLoc].Text);
     Items[itemA].Location = roomB;
     if (roomB == MyLoc)
@@ -837,10 +947,8 @@ static void PutItemAInRoomB(int itemA, int roomB)
 static void SwapCounters(int index)
 {
     debug_print("Main counter (47) is swapped with counter %d\n", index);
-    if (index > 63) {
-        debug_print("ERROR! parameter out of range. Max 63, got %d\n", index);
-        index = 63;
-    }
+    if (!IsValidCounter(index))
+        return;
     int temp = CurrentCounter;
 
     CurrentCounter = Counters[index];
@@ -850,6 +958,8 @@ static void SwapCounters(int index)
 
 static void SwapItemLocations(int itemA, int itemB)
 {
+    if (!IsValidItem(itemA) || !IsValidItem(itemB))
+        return;
     int temp = Items[itemA].Location;
     Items[itemA].Location = Items[itemB].Location;
     Items[itemB].Location = temp;
@@ -857,9 +967,13 @@ static void SwapItemLocations(int itemA, int itemB)
 
 static void MoveItemAToLocOfItemB(int itemA, int itemB)
 {
+    if (!IsValidItem(itemA) || !IsValidItem(itemB))
+        return;
     Items[itemA].Location = Items[itemB].Location;
 }
 
+/* Game over: ask if the player wants to play again, then either
+   set should_restart or exit. */
 static void DoneIt(void)
 {
     Output("\n");
@@ -873,6 +987,8 @@ static void DoneIt(void)
     }
 }
 
+/* Printf-style output to the lower text buffer, mirrored to the
+   transcript if active. Used by ListInventory for lower-window output. */
 static void WriteToLowerWindow(const char *fmt, ...)
 {
     va_list ap;
@@ -889,6 +1005,9 @@ static void WriteToLowerWindow(const char *fmt, ...)
         glk_put_string_stream(Transcript, msg);
 }
 
+/* Print the player's inventory. If 'upper' is set, output goes to the
+   room description stream (for the status window); otherwise it goes to
+   the lower text buffer. Items with empty text are invisible and skipped. */
 static void ListInventory(int upper)
 {
     int i, ct = 0;
@@ -915,7 +1034,6 @@ static void ListInventory(int upper)
         if (Items[i].Location == CARRIED) {
             if (Items[i].Text[0] == 0) {
                 debug_print("Invisible item in inventory: %d\n", i);
-                i++;
                 continue;
             }
 
@@ -944,9 +1062,60 @@ static void ClearScreen(void)
     glk_window_clear(Bottom);
 }
 
-void DrawApple2ImageFromVideoMem(void);
+static int ObjectArgument(int arg);
 
-static void SysCommand(int arg1, int arg2)
+/* System command 12: put the next item at a place in counter 30,
+   starting from the item already there, so that a loop can visit them
+   all. When there are no more, counter 30 becomes 0 and the loop is
+   left at its next loopback, as after a 115. Returns nonzero when the
+   action table must be scanned again from the top. */
+static int NextItemAt(int mode)
+{
+    int i = NounObject;
+    int place;
+
+    switch (mode) {
+    case 1:
+        place = ItemRegister;
+        break;
+    case 2:
+        place = MyLoc;
+        break;
+    case 3:
+        place = CARRIED;
+        break;
+    case 4:
+        /* Here or carried. The original only ever looks at one item
+           in this mode, and starts over when it is somewhere else. */
+        if (IsValidItem(i) && (Items[i].Location == MyLoc || Items[i].Location == CARRIED))
+            return 0;
+        if (i + 1 <= GameHeader.NumItems)
+            return 1;
+        pop_at_loopback = 1;
+        NounObject = 0;
+        return 0;
+    default:
+        return 0;
+    }
+
+    do {
+        if (IsValidItem(i) && Items[i].Location == place) {
+            NounObject = i;
+            return 0;
+        }
+        i++;
+    } while (i <= GameHeader.NumItems);
+
+    pop_at_loopback = 1;
+    NounObject = 0;
+    return 0;
+}
+
+/* Execute a system command (action opcode 110). These handle animation,
+   image drawing, save/restore, and item flag manipulation — operations
+   outside the standard Scott Adams action set. Returns nonzero when the
+   action table must be scanned again from the top. */
+static int SysCommand(int arg1, int arg2)
 {
     switch (arg1) {
     case 1:
@@ -967,6 +1136,9 @@ static void SysCommand(int arg1, int arg2)
         Animate(Counters[arg2]);
         break;
     case 5:
+        /* A deliberate deviation: the original interpreter draws the
+           picture at once. Here it is kept as the background of the
+           animation and drawn when that runs. */
         debug_print("Unpack special picture %d (Set animation background)\n", arg2);
         AnimationBackground = arg2;
         break;
@@ -977,18 +1149,20 @@ static void SysCommand(int arg1, int arg2)
     case 7:
         debug_print("DrawItemImage %d\n", Counters[arg2]);
         DrawItemImage(Counters[arg2]);
-        if (CurrentSys == SYS_APPLE2)
-            DrawApple2ImageFromVideoMem();
+        ShowApple2Screen();
         break;
     case 8:
         debug_print("DrawRoomImage %d\n", Counters[arg2]);
         DrawRoomImage(Counters[arg2]);
         break;
     case 9: {
-        debug_print("Swap item %d flags with counter 63\n", arg2);
-        int temp = Counters[63];
-        Counters[63] = Items[arg2].Flag;
-        Items[arg2].Flag = temp;
+        int item = ObjectArgument(arg2);
+        debug_print("Swap item %d flags with counter 63\n", item);
+        if (!IsValidItem(item))
+            break;
+        int temp = ItemRegister;
+        ItemRegister = Items[item].Flag;
+        Items[item].Flag = temp;
         break;
     }
     case 10:
@@ -999,11 +1173,22 @@ static void SysCommand(int arg1, int arg2)
         debug_print("Add room image %d to animate buffer\n", Counters[arg2]);
         AddRoomImage(Counters[arg2]);
         break;
+    case 12:
+        debug_print("Next item, mode %d, from item %d\n", arg2, NounObject);
+        return NextItemAt(arg2);
     default:
         debug_print("Unknown system command %d\n", arg1);
         break;
     }
+    return 0;
 }
+
+/* How the result of a condition is combined with those before it */
+typedef enum {
+    LOGIC_AND,
+    LOGIC_OR,
+    LOGIC_XOR
+} LogicMode;
 
 typedef enum {
     NO_PAREN,
@@ -1011,20 +1196,26 @@ typedef enum {
     RIGHT_PAREN
 } ParenType;
 
-static ParenType SetLogicControlFlags(int mode, int *not_mode, int *not_continuous, int *or_mode, int *fuzzy_match)
+/* Process a condition-table logic control flag (condition code 31).
+   These modify how subsequent conditions are combined:
+   0=AND, 1=OR, 2=XOR, 3=negate next, 4=negate until cancelled, 5=cancel negate,
+   6/7=parentheses, 8=always true, 9=fuzzy match, 10=strict match. */
+static ParenType SetLogicControlFlags(int mode, int *not_mode, int *not_continuous, int *logic_mode, int *fuzzy_match)
 {
     ParenType paren = NO_PAREN;
     debug_print("Mode %d, ", mode);
     switch (mode) {
     case 0:
-        *or_mode = 0;
+        *logic_mode = LOGIC_AND;
         break;
     case 1:
         debug_print("OR mode!\n");
-        *or_mode = 1;
+        *logic_mode = LOGIC_OR;
         break;
     case 2:
-        Fatal("Unimplemented XOR mode");
+        debug_print("XOR mode!\n");
+        *logic_mode = LOGIC_XOR;
+        break;
     case 3:
         debug_print("Negate single!\n");
         *not_mode = 1;
@@ -1064,27 +1255,92 @@ static ParenType SetLogicControlFlags(int mode, int *not_mode, int *not_continuo
     return paren;
 }
 
-int CalculateConditionResult(int x, int y, int or_condition)
+/* Combine two condition results according to the logic mode. */
+static int CalculateConditionResult(int x, int y, int logic_mode)
 {
-    if (or_condition == 0) {
+    switch (logic_mode) {
+    case LOGIC_OR:
+        return (x || y);
+    case LOGIC_XOR:
+        return ((x != 0) != (y != 0));
+    default:
         return (x && y);
     }
-
-    return (x || y);
 }
 
-int parens_depth = 0;
-int parens_stack[5];
+/* How deep parenthesised condition groups may be nested */
+#define MAX_PARENS_DEPTH 5
 
+/* Read the extra argument of a two-argument condition. It is stored as
+   the argument of the (code 0) pair that follows, so the code is skipped. */
+static int NextConditionArgument(const uint16_t *ptr, int *cc)
+{
+    (*cc)++;
+    return ptr[(*cc)++];
+}
+
+/* The item an argument stands for: ARG_NOUN, ARG_NOUN2 and
+   ARG_WITH_LIST name the items of the command, anything else is the
+   number itself. */
+static int ObjectArgument(int arg)
+{
+    switch (arg) {
+    case ARG_NOUN:
+        return NounObject;
+    case ARG_NOUN2:
+        return Noun2Object;
+    case ARG_WITH_LIST:
+        return WithListObject;
+    default:
+        return arg;
+    }
+}
+
+/* The noun an argument stands for: ARG_NOUN, ARG_NOUN2 and
+   ARG_WITH_LIST name the nouns of the command, anything else is the
+   number of a noun. */
+static int NounArgument(int arg)
+{
+    switch (arg) {
+    case ARG_NOUN:
+        return CurrentNoun;
+    case ARG_NOUN2:
+        return CurrentNoun2;
+    case ARG_WITH_LIST:
+        return WithListNoun();
+    default:
+        return arg;
+    }
+}
+
+/* Whether two nouns are the same word, or with fuzzy set the same up
+   to the hash sign that tells homonyms apart. */
+static int NounsMatch(int noun1, int noun2, int fuzzy)
+{
+    if (noun1 == noun2)
+        return 1;
+    if (!fuzzy)
+        return 0;
+    return CompareUpToHashSign(Nouns[GetDictWord(noun1)].Word, Nouns[GetDictWord(noun2)].Word);
+}
+
+/* Evaluate the condition list of an action. Conditions are pairs of
+   (code, argument) terminated by 255. Supports AND/OR/NOT logic,
+   parenthetical grouping, fuzzy dictionary matching, and special
+   argument values ARG_NOUN/ARG_NOUN2 for the current noun/noun2 objects.
+   Returns ACT_SUCCESS if all conditions pass, ACT_FAILURE otherwise. */
 static ActionResultType TestConditions(uint16_t *ptr)
 {
     int negate_condition = 0;
     int negate_multiple = 0;
-    int or_condition = 0;
+    int logic_mode = LOGIC_AND;
     int fuzzy_match = 0;
     int last_result = 1;
     int current_result = 1;
     int one_success = 0;
+
+    int parens_depth = 0;               /* Current nesting depth of parenthesised condition groups */
+    int parens_stack[MAX_PARENS_DEPTH]; /* Saved intermediate results for each open parenthesis */
 
     int cc = 0;
 
@@ -1098,13 +1354,7 @@ static ActionResultType TestConditions(uint16_t *ptr)
 
         originaldv = dv;
 
-        if (dv == 998) {
-            dv = NounObject;
-        } else if (dv == 999) {
-            dv = Noun2Object;
-        } else if (dv == 997) {
-            Fatal("With list unimplemented");
-        }
+        dv = ObjectArgument(dv);
 
         debug_print("Testing condition %d: ", cv);
         current_result = 1;
@@ -1113,37 +1363,46 @@ static ActionResultType TestConditions(uint16_t *ptr)
         case 0:
             break;
         case 1:
+            if (!IsValidItem(dv)) {
+                current_result = 0;
+                break;
+            }
             debug_print("Does the player carry %s?\n", Items[dv].Text);
             if (Items[dv].Location != CARRIED) {
                 current_result = 0;
             }
             break;
         case 2:
-            if (dv < 0 || dv > GameHeader.NumItems) {
-                debug_print("Parameter out of range! (%d)\n", dv);
+            if (!IsValidItem(dv)) {
                 current_result = 0;
                 break;
             }
-
             debug_print("Is %s in location?\n", Items[dv].Text);
             if (Items[dv].Location != MyLoc) {
                 current_result = 0;
             }
             break;
         case 3:
+            if (!IsValidItem(dv)) {
+                current_result = 0;
+                break;
+            }
             debug_print("Is %s held or in location?\n", Items[dv].Text);
             if (Items[dv].Location != CARRIED && Items[dv].Location != MyLoc) {
                 current_result = 0;
             }
             break;
         case 4:
-            debug_print("Is location room %d, %s?\n", dv, Rooms[dv].Text);
+            debug_print("Is location room %d?\n", dv);
             if (MyLoc != dv)
                 current_result = 0;
             break;
         case 5:
-            cc++;
-            dv2 = ptr[cc++];
+            dv2 = NextConditionArgument(ptr, &cc);
+            if (!IsValidCounter(dv) || !IsValidRoom(Counters[dv])) {
+                current_result = 0;
+                break;
+            }
             debug_print("Is description of room %d (counter %d) (%d) == Message %d?\n", Counters[dv], dv, Rooms[Counters[dv]].Exits[6], dv2);
             if (Rooms[Counters[dv]].Exits[6] != dv2)
                 current_result = 0;
@@ -1167,12 +1426,20 @@ static ActionResultType TestConditions(uint16_t *ptr)
             }
             break;
         case 13:
+            if (!IsValidItem(dv)) {
+                current_result = 0;
+                break;
+            }
             debug_print("Is %s (%d) in play?\n", Items[dv].Text, dv);
             if (Items[dv].Location == 0) {
                 current_result = 0;
             }
             break;
         case 14:
+            if (!IsValidItem(dv)) {
+                current_result = 0;
+                break;
+            }
             debug_print("Is %s NOT in play?\n", Items[dv].Text);
             if (Items[dv].Location) {
                 current_result = 0;
@@ -1191,17 +1458,18 @@ static ActionResultType TestConditions(uint16_t *ptr)
             }
             break;
         case 17:
-            cc++;
-            dv2 = ptr[cc++];
+            dv2 = NextConditionArgument(ptr, &cc);
             debug_print("Is Counter %d == Counter %d?\n", dv, dv2);
-
-            if (Counters[dv] != Counters[dv2]) {
+            if (!IsValidCounter(dv) || !IsValidCounter(dv2) || Counters[dv] != Counters[dv2]) {
                 current_result = 0;
             }
             break;
         case 18:
-            cc++;
-            dv2 = ptr[cc++];
+            dv2 = NextConditionArgument(ptr, &cc);
+            if (!IsValidCounter(dv) || !IsValidCounter(dv2)) {
+                current_result = 0;
+                break;
+            }
             debug_print("Is counter %d (%d) greater than counter %d (%d)?\n", dv, Counters[dv], dv2, Counters[dv2]);
             if (Counters[dv] <= Counters[dv2]) {
                 current_result = 0;
@@ -1214,114 +1482,72 @@ static ActionResultType TestConditions(uint16_t *ptr)
             }
             break;
         case 20:
-            cc++;
-            dv2 = ptr[cc++];
-            debug_print("Is counter %d (%d) == %d?\n", dv, Counters[dv], dv2);
-            if (Counters[dv] != dv2)
+            dv2 = NextConditionArgument(ptr, &cc);
+            debug_print("Is counter %d == %d?\n", dv, dv2);
+            if (!IsValidCounter(dv) || Counters[dv] != dv2)
                 current_result = 0;
             break;
 
         case 21:
-            cc++;
-            dv2 = ptr[cc++];
-            debug_print("Is counter %d (%d) >= %d?\n", dv, Counters[dv], dv2);
-            if (Counters[dv] < dv2)
+            dv2 = NextConditionArgument(ptr, &cc);
+            debug_print("Is counter %d >= %d?\n", dv, dv2);
+            if (!IsValidCounter(dv) || Counters[dv] < dv2)
                 current_result = 0;
             break;
         case 22:
-            debug_print("Is counter %d (%d) == 0?\n", dv, Counters[dv]);
-            if (Counters[dv] != 0)
+            debug_print("Is counter %d == 0?\n", dv);
+            if (!IsValidCounter(dv) || Counters[dv] != 0)
                 current_result = 0;
             break;
         case 23:
-            cc++;
-            dv2 = ptr[cc++];
-            debug_print("Is item %d (%s) in room (counter %d) %d?\n", dv, Items[dv].Text, dv2, Counters[dv2]);
-            if (Items[dv].Location != Counters[dv2])
+            dv2 = NextConditionArgument(ptr, &cc);
+            debug_print("Is item %d in the room of counter %d?\n", dv, dv2);
+            if (!IsValidItem(dv) || !IsValidCounter(dv2) || Items[dv].Location != Counters[dv2])
                 current_result = 0;
             break;
         case 26:
-            cc++;
-            dv2 = ptr[cc++];
+            /* The room may be given as the item of a noun as well */
+            dv2 = ObjectArgument(NextConditionArgument(ptr, &cc));
             debug_print("Is object %d in room %d?\n", dv, dv2);
-            if (Items[dv].Location != dv2)
+            if (!IsValidItem(dv) || Items[dv].Location != dv2)
                 current_result = 0;
-
             break;
         case 28:
-            cc++;
-            dv2 = ptr[cc++];
-            if (dv < 1 || dv2 < 1 || dv > GameHeader.NumItems + 1 || dv2 > GameHeader.NumItems + 1)
-                debug_print("Is dictword of item (dv) %d == dictword group (dv2) %d?\n", dv, dv2);
-            else
-                debug_print("Is dictword (%d) of item %d (%s) == dictword (%d) of item %d (%s)?\n", Items[dv].Dictword, dv, Items[dv].Text, Items[dv2].Dictword, dv2, Items[dv2].Text);
-            if (originaldv == 999) {
-                if (CurrentNoun2 == dv2)
-                    break;
+            /* Both arguments are nouns, not items */
+            dv = NounArgument(originaldv);
+            dv2 = NounArgument(NextConditionArgument(ptr, &cc));
+            debug_print("Is noun %d the noun %d?%s\n", dv, dv2, fuzzy_match ? " (Fuzzy match)" : "");
+            if (!NounsMatch(dv, dv2, fuzzy_match))
                 current_result = 0;
-            } else if (originaldv == 998) {
-                if (CurrentNoun == dv2)
-                    break;
-                current_result = 0;
-            } else if (originaldv == 997) {
-                Fatal("With list unimplemented");
-            } else {
-                if (Items[dv].Dictword == 0)
-                    break;
-                if (dv > GameHeader.NumItems + 1 || dv2 > GameHeader.NumItems + 1 || Items[dv].Dictword != Items[dv2].Dictword) {
-                    current_result = 0;
-                    if (dv > GameHeader.NumItems + 1 || dv2 > GameHeader.NumItems + 1)
-                        debug_print("Error: Argument out of bounds\n!");
-                }
-            }
             break;
         case 29:
-            cc++;
-            dv2 = ptr[cc++];
-            if (dv2 == 998)
-                dv2 = CurrentNoun;
-            else if (dv2 == 999)
-                dv2 = CurrentNoun2;
-            else if (dv2 == 997)
-                Fatal("With list unimplemented");
-            debug_print("Is dictword of object %d (%s) %d? (%s)\n", dv, Nouns[GetDictWord(Items[NounObject].Dictword)].Word, dv2, Nouns[GetDictWord(dv2)].Word);
-            if (fuzzy_match) {
-                debug_print("(Fuzzy match)\n");
-                char *dictword1 = Nouns[GetDictWord(Items[NounObject].Dictword)].Word;
-                char *dictword2 = Nouns[GetDictWord(dv2)].Word;
-                if (!CompareUpToHashSign(dictword1, dictword2))
-                    current_result = 0;
-            } else {
-                debug_print("(Exact match)\n");
-                if (Items[NounObject].Dictword != dv2) {
-                    current_result = 0;
-                }
-            }
+            dv2 = NounArgument(NextConditionArgument(ptr, &cc));
+            debug_print("Is the noun of item %d the noun %d?%s\n", dv, dv2, fuzzy_match ? " (Fuzzy match)" : "");
+            if (!IsValidItem(dv) || !NounsMatch(Items[dv].Dictword, dv2, fuzzy_match))
+                current_result = 0;
             break;
         case 30:
-            cc++;
-            dv2 = ptr[cc++];
-            if (dv > GameHeader.NumItems)
-                debug_print("Bug! dv Out of bounds! dv:%d GameHeader.NumItems:%d\n", dv, GameHeader.NumItems);
+            dv2 = NextConditionArgument(ptr, &cc);
             debug_print("Is Object flag %d & %d != 0\n", dv, dv2);
-            if ((Items[dv].Flag & dv2) == 0)
+            if (!IsValidItem(dv) || (Items[dv].Flag & dv2) == 0)
                 current_result = 0;
             break;
         case 31: /* logics control flags */
         {
 
-            if (dv == 1 && one_success == 0) {
+            /* OR and XOR start from false when nothing has succeeded yet */
+            if ((dv == 1 || dv == 2) && one_success == 0) {
                 last_result = 0;
             }
 
-            ParenType paren = SetLogicControlFlags(dv, &negate_condition, &negate_multiple, &or_condition, &fuzzy_match);
+            ParenType paren = SetLogicControlFlags(dv, &negate_condition, &negate_multiple, &logic_mode, &fuzzy_match);
 
             if (paren == LEFT_PAREN) {
-                if (parens_depth >= 4)
+                if (parens_depth >= MAX_PARENS_DEPTH)
                     Fatal("Too many nested parentheses in conditions");
                 parens_stack[parens_depth] = last_result;
                 debug_print("left parent.n\nSet parens_stack[%d] to last result %d\n", parens_depth, last_result);
-                last_result = (or_condition == 0);
+                last_result = (logic_mode == LOGIC_AND);
                 parens_depth++;
             } else if (paren == RIGHT_PAREN) {
                 if (parens_depth <= 0)
@@ -1330,13 +1556,17 @@ static ActionResultType TestConditions(uint16_t *ptr)
                 debug_print("right parens.\n\nGetting pushed result %d from parens_stack[%d]\n", parens_stack[parens_depth], parens_depth);
                 current_result = last_result;
                 last_result = parens_stack[parens_depth];
-                last_result = CalculateConditionResult(last_result, current_result, or_condition);
+                last_result = CalculateConditionResult(last_result, current_result, logic_mode);
             }
             break;
         }
         default:
-            debug_print("Unknown condition %d, arg == %d\n", cv, dv);
-            current_result = 0;
+            /* Conditions 6, 7, 11, 12, 24, 25 and 27 have no handler in
+               the MS-DOS interpreter of the unfinished X-Men (S.A.G.A. +
+               version 225), where a condition without one leaves the
+               result true. X-Men uses 27 once ("27.21", when Physco-Man
+               sees the headband), and he does leave. */
+            debug_print("Condition %d without a handler (arg %d): always true\n", cv, dv);
             break;
         }
 
@@ -1352,11 +1582,11 @@ static ActionResultType TestConditions(uint16_t *ptr)
                     negate_condition = 0;
             }
 
-            if (current_result == 1 && cv != 31) {
+            if (current_result == 1) {
                 debug_print("YES\n");
             }
 
-            last_result = CalculateConditionResult(last_result, current_result, or_condition);
+            last_result = CalculateConditionResult(last_result, current_result, logic_mode);
             if (last_result)
                 one_success = 1;
         }
@@ -1368,6 +1598,7 @@ static ActionResultType TestConditions(uint16_t *ptr)
         return ACT_FAILURE;
 }
 
+/* Debug helper: print the meaning of well-known bit flag indices. */
 static void PrintFlagInfo(int arg)
 {
     switch (arg) {
@@ -1394,7 +1625,9 @@ static void PrintFlagInfo(int arg)
     }
 }
 
-void SetCountersFromInput(void) {
+/* Copy the current parsed input words into their counter-register aliases
+   (Counters 48–53) so the action table can read/modify them. */
+static void SetCountersFromInput(void) {
     VerbCounter = CurrentVerb;
     NounCounter = CurrentNoun;
     AdverbCounter = CurrentAdverb;
@@ -1403,6 +1636,73 @@ void SetCountersFromInput(void) {
     Noun2Counter = CurrentNoun2;
 }
 
+/* The decoded operands of one action command. Operands below 64 also
+   carry the value of the counter with that number (ca1..ca3). */
+typedef struct {
+    int16_t arg1, arg2, arg3;
+    int16_t ca1, ca2, ca3;
+    int object;
+    int plus_one_arg;
+} CommandArgs;
+
+/* Reads up to three operand bytes following the opcode at commands[cc - 1].
+   A high bit on the first operand makes it a 15-bit value, consuming the
+   second byte as well. Operands ARG_NOUN and ARG_NOUN2 refer to the
+   current nouns. */
+static CommandArgs DecodeCommandArgs(const uint8_t *commands, int cc, int length)
+{
+    CommandArgs a = { 0 };
+
+    if (cc > length)
+        return a;
+
+    a.arg1 = commands[cc];
+    a.object = a.arg1;
+    if (cc + 1 <= length) {
+        a.arg2 = commands[cc + 1];
+        if (cc + 2 <= length)
+            a.arg3 = commands[cc + 2];
+    }
+
+    if (a.arg1 < NUM_COUNTERS)
+        a.ca1 = Counters[a.arg1];
+    if (a.arg2 < NUM_COUNTERS)
+        a.ca2 = Counters[a.arg2];
+    if (a.arg3 < NUM_COUNTERS)
+        a.ca3 = Counters[a.arg3];
+
+    if (a.arg1 & 128) {
+        a.arg1 = (a.arg1 & 127) * 256 + a.arg2;
+        a.arg2 = a.arg3;
+        a.plus_one_arg = 1;
+    }
+    if (a.arg1 == ARG_NOUN) {
+        a.arg1 = CurrentNoun;
+        a.object = NounObject;
+    } else if (a.arg1 == ARG_NOUN2) {
+        a.arg1 = CurrentNoun2;
+        a.object = Noun2Object;
+    } else if (a.arg1 == ARG_WITH_LIST) {
+        a.arg1 = WithListNoun();
+        a.object = WithListObject;
+    }
+    return a;
+}
+
+/* Drop the innermost loop from the loop stack. */
+static void PopLoop(void)
+{
+    loops[loop_index] = 0;
+    if (loop_index > 0)
+        loop_index--;
+}
+
+/* Execute a single action table entry: test its conditions, then run
+   its command sequence. Commands include item manipulation, player
+   movement, counter arithmetic, message printing, image drawing, loops,
+   and system commands. Returns an ActionResultType indicating whether
+   to continue scanning (ACT_CONTINUE), stop (ACT_DONE), loop back
+   (ACT_LOOP/ACT_LOOP_BEGIN), or that the game ended (ACT_GAMEOVER). */
 static ActionResultType PerformLine(int ct)
 {
     debug_print("\nPerforming line %d: (", ct);
@@ -1420,9 +1720,9 @@ static ActionResultType PerformLine(int ct)
         return ACT_FAILURE;
     }
 
-#if defined(__clang__)
+    command_done = 1;
+
 #pragma mark Commands
-#endif
 
     /* Commands */
     cc = 0;
@@ -1430,44 +1730,11 @@ static ActionResultType PerformLine(int ct)
     int length = Actions[ct].CommandLength;
     while (cc <= length) {
         int cmd = commands[cc++];
-        int16_t arg1 = 0, arg2 = 0, arg3 = 0,
-                ca1 = 0, ca2 = 0, ca3 = 0;
-
-        int object = 0;
-        int plus_one_arg = 0;
-
-        if (cc <= length) {
-            arg1 = commands[cc];
-            object = arg1;
-            if (cc + 1 <= length) {
-                arg2 = commands[cc + 1];
-                if (cc + 2 <= length) {
-                    arg3 = commands[cc + 2];
-                }
-            }
-
-            if (arg1 < 64)
-                ca1 = Counters[arg1];
-            if (arg2 < 64)
-                ca2 = Counters[arg2];
-            if (arg3 < 64)
-                ca3 = Counters[arg3];
-
-            if (arg1 & 128) {
-                arg1 = (arg1 & 127) * 256 + arg2;
-                arg2 = arg3;
-                plus_one_arg = 1;
-            }
-            if (arg1 == 998) {
-                arg1 = CurrentNoun;
-                object = NounObject;
-            } else if (arg1 == 999) {
-                arg1 = CurrentNoun2;
-                object = Noun2Object;
-            } else if (arg1 == 997) {
-                Fatal("With list unimplemented");
-            }
-        }
+        CommandArgs args = DecodeCommandArgs(commands, cc, length);
+        int16_t arg1 = args.arg1, arg2 = args.arg2, arg3 = args.arg3,
+                ca1 = args.ca1, ca2 = args.ca2, ca3 = args.ca3;
+        int object = args.object;
+        int plus_one_arg = args.plus_one_arg;
 
         debug_print("\nPerforming command %d: ", cmd);
         if (cmd >= 1 && cmd < 52) {
@@ -1477,25 +1744,29 @@ static ActionResultType PerformLine(int ct)
             case 0: /* NOP */
                 break;
             case 52:
-                if (CountItemsInRoom(0) >= GameHeader.MaxCarry) {
+                /* The limit is counter 42, which the game may change.
+                   Item 0 does not count. */
+                InventoryCount = 0;
+                for (int i = 1; i <= GameHeader.NumItems; i++) {
+                    if (Items[i].Location == CARRIED)
+                        InventoryCount++;
+                }
+                if (InventoryCount >= CarryLimit) {
                     SystemMessage(YOURE_CARRYING_TOO_MUCH);
                     lastwasnewline = 1;
                     return ACT_SUCCESS;
                 }
-                Items[object].Location = CARRIED;
-                CheckForObjectImage(object);
+                InventoryCount++;
+                MoveItemTo(object, CARRIED);
                 cc += 1 + plus_one_arg;
                 break;
             case 53:
-                debug_print("Item %d (\"%s\") is now in location.\n", object,
-                    Items[object].Text);
-                Items[object].Location = MyLoc;
-                CheckForObjectImage(object);
+                debug_print("Item %d is now in location.\n", object);
+                MoveItemTo(object, MyLoc);
                 cc += 1 + plus_one_arg;
                 break;
             case 54:
-                debug_print("Player location is now room %d (%s).\n", arg1,
-                    Rooms[arg1].Text);
+                debug_print("Player location is now room %d.\n", arg1);
                 MyLoc = commands[cc++];
                 SetBit(DRAWBIT);
                 break;
@@ -1512,12 +1783,14 @@ static ActionResultType PerformLine(int ct)
                 CurrentPrep = 0;
                 CurrentNoun2 = 0;
                 CurrentAdverb = 0;
+                WithListCount = 0;
 
                 SetCountersFromInput();
 
                 keep_going = 1;
                 done = 1;
                 found_match = 0;
+                command_done = 0;
                 cc += 2;
                 break;
             case 56:
@@ -1528,16 +1801,12 @@ static ActionResultType PerformLine(int ct)
                 break;
             case 58:
                 debug_print("Bitflag %d is set\n", arg1);
-#ifdef DEBUG_ACTIONS
                 PrintFlagInfo(arg1);
-#endif
                 SetBit(commands[cc++]);
                 break;
             case 59:
-                debug_print("Item %d (%s) is removed from play.\n", object,
-                    Items[object].Text);
-                Items[object].Location = 0;
-                CheckForObjectImage(object);
+                debug_print("Item %d is removed from play.\n", object);
+                MoveItemTo(object, 0);
                 cc += 1 + plus_one_arg;
                 break;
             case 60:
@@ -1559,26 +1828,30 @@ static ActionResultType PerformLine(int ct)
                 break;
             case 64:
                 debug_print("Counter %d == %d\n", arg2, arg1);
-                Counters[arg2] = arg1;
+                if (IsValidCounter(arg2))
+                    Counters[arg2] = arg1;
                 cc += 2 + plus_one_arg;
                 break;
             case 65:
                 debug_print("Multiply: Counter %d = Counter %d (%d) * Counter %d (%d) == %d\n", arg2, arg1, ca1, arg2, ca2, ca1 * ca2);
-                Counters[arg2] = ca1 * ca2;
+                if (IsValidCounter(arg2))
+                    Counters[arg2] = ca1 * ca2;
                 cc += 2;
                 break;
             case 66:
                 ListInventory(0);
+                /* Claymorgue also has an inventory screen: the list in
+                   the upper window, under pictures of what is carried */
                 if (CurrentGame == CLAYMORGUE)
                     UpdateClaymorgueInventory();
                 break;
             case 67:
                 debug_print("Set bitflag 0\n");
-                SetBit(0);
+                SetBit(FLAG0BIT);
                 break;
             case 68:
                 debug_print("Clear bitflag 0\n");
-                ResetBit(0);
+                ResetBit(FLAG0BIT);
                 break;
             case 69:
                 debug_print("Done (stop reading lines)\n");
@@ -1601,8 +1874,7 @@ static ActionResultType PerformLine(int ct)
                 continuation = 1;
                 break;
             case 74:
-                Items[object].Location = CARRIED;
-                CheckForObjectImage(object);
+                MoveItemTo(object, CARRIED);
                 cc += 1 + plus_one_arg;
                 break;
             case 75:
@@ -1615,9 +1887,11 @@ static ActionResultType PerformLine(int ct)
                 Look(1);
                 break;
             case 77:
-                if (CurrentCounter >= 1)
-                    CurrentCounter--;
-                debug_print("decrementing current counter. Current counter is now %d.\n",
+                /* No floor: the MS-DOS interpreters of all five games and
+                   the Atari ST one decrement, and subtract in 83, without
+                   one */
+                CurrentCounter--;
+                debug_print("Decrementing current counter. Current counter is now %d.\n",
                     CurrentCounter);
                 break;
             case 78:
@@ -1630,7 +1904,8 @@ static ActionResultType PerformLine(int ct)
                 break;
             case 80:
                 debug_print("Counter %d is set to location of object %d.\n", arg2, object);
-                Counters[arg2] = Items[object].Location;
+                if (IsValidCounter(arg2) && IsValidItem(object))
+                    Counters[arg2] = Items[object].Location;
                 cc += 2 + plus_one_arg;
                 break;
             case 81:
@@ -1643,26 +1918,26 @@ static ActionResultType PerformLine(int ct)
                 break;
             case 83:
                 CurrentCounter -= arg1;
-                if (CurrentCounter < -1)
-                    CurrentCounter = -1;
                 cc += 1 + plus_one_arg;
                 break;
             case 84:
                 PrintNoun();
                 break;
             case 85:
-                debug_print("Print name of item %d (%s)\n", object, Items[object].Text);
-                Display(Bottom, " %s", Items[object].Text);
+                debug_print("Print name of item %d\n", object);
+                if (IsValidItem(object))
+                    Display(Bottom, " %s", Items[object].Text);
                 cc += 1 + plus_one_arg;
                 break;
             case 86:
                 debug_print("Output dictword of item (%d) + space.\n", arg1);
-                Display(Bottom, "%s ", Nouns[GetDictWord(Items[arg1].Dictword)].Word);
+                if (IsValidItem(arg1))
+                    Display(Bottom, "%s ", Nouns[GetDictWord(Items[arg1].Dictword)].Word);
                 cc++;
                 break;
             case 88:
                 debug_print("Delay\n");
-                Delay(1);
+                Delay(1000);
                 break;
             case 89:
                 debug_print("Draw current room image\n");
@@ -1677,7 +1952,7 @@ static ActionResultType PerformLine(int ct)
                 break;
             case 91:
                 debug_print("Divide: Counter %d = Counter %d (%d) / counter %d (%d), Counter %d = Counter %d (%d) / counter %d (%d)\n", arg2, arg2, ca2, arg1, ca1, arg3, arg2, ca2, arg1, ca1);
-                if (ca1) {
+                if (ca1 && IsValidCounter(arg2) && IsValidCounter(arg3)) {
                     Counters[arg3] = ca2 % ca1;
                     Counters[arg2] = ca2 / ca1;
                 }
@@ -1688,103 +1963,127 @@ static ActionResultType PerformLine(int ct)
                 keep_going = 0;
                 break;
             case 93:
-                debug_print("Delay Counter %d (%d) * .25 seconds (%f)\n", arg1, Counters[arg1], Counters[arg1] * 0.25);
-                if (CurrentGame == CLAYMORGUE)
-                    Delay(Counters[arg1] * 0.125);
-                else
-                    Delay(Counters[arg1] * 0.25);
+                /* The delay unit is a quarter of a second, except in
+                   Claymorgue, where it is an eighth. */
+                debug_print("Delay Counter %d (%d) * %d ms\n", arg1, ca1, CurrentGame == CLAYMORGUE ? 125 : 250);
+                Delay(ca1 * (CurrentGame == CLAYMORGUE ? 125 : 250));
                 cc++;
                 break;
             case 94:
                 debug_print("Counter %d = exit %d from room %d\n", arg1, ca3, ca2);
-                Counters[arg1] = Rooms[ca2].Exits[ca3];
+                if (IsValidCounter(arg1) && IsValidRoom(ca2) && ca3 >= 0 && ca3 < 8)
+                    Counters[arg1] = Rooms[ca2].Exits[ca3];
                 cc += 3;
                 break;
             case 95:
                 debug_print("Exit %d of room %d is set to %d\n", ca2, ca1, ca3);
-                Rooms[ca1].Exits[ca2] = ca3;
+                if (IsValidRoom(ca1) && ca2 >= 0 && ca2 < 8)
+                    Rooms[ca1].Exits[ca2] = ca3;
                 cc += 3;
                 break;
             case 97:
                 debug_print("Swap counters %d %d \n", arg1, arg2);
                 /* Draw room image after jumping off Claymorgue crate */
-                if (arg1 == 32 && ca2 != MyLoc)
+                if (arg1 == COUNTER_ROOM && ca2 != MyLoc)
                     SetBit(DRAWBIT);
-                Counters[arg1] = ca2;
-                Counters[arg2] = ca1;
+                if (IsValidCounter(arg1) && IsValidCounter(arg2)) {
+                    Counters[arg1] = ca2;
+                    Counters[arg2] = ca1;
+                }
                 cc += 2;
                 break;
             case 98:
                 debug_print("Counter %d = counter %d\n", arg2, arg1);
-                Counters[arg2] = ca1;
+                if (IsValidCounter(arg2))
+                    Counters[arg2] = ca1;
                 cc += 2;
                 break;
             case 99:
                 debug_print("Counter %d is set to %d \n", arg2, arg1);
-                Counters[arg2] = arg1;
+                if (IsValidCounter(arg2))
+                    Counters[arg2] = arg1;
                 cc += 2 + plus_one_arg;
                 break;
             case 100:
                 debug_print("Add %d to counter %d\n", arg1, arg2);
-                Counters[arg2] += arg1;
+                if (IsValidCounter(arg2))
+                    Counters[arg2] += arg1;
                 cc += 2 + plus_one_arg;
                 break;
             case 101:
                 debug_print("Decrease counter %d by %d\n", arg2, arg1);
-                Counters[arg2] -= arg1;
+                if (IsValidCounter(arg2))
+                    Counters[arg2] -= arg1;
                 cc += 2 + plus_one_arg;
                 break;
             case 102:
                 debug_print("Print counter %d\n", arg1);
-                OutputNumber(Counters[arg1]);
+                if (IsValidCounter(arg1))
+                    OutputNumber(Counters[arg1]);
                 cc++;
                 break;
             case 103:
                 debug_print("ABS counter %d\n", arg1);
-                if (ca1 < 0)
+                if (IsValidCounter(arg1) && ca1 < 0)
                     Counters[arg1] = -ca1;
                 cc++;
                 break;
             case 104:
                 debug_print("NEG counter %d\n", arg1);
-                Counters[arg1] = -Counters[arg1];
+                if (IsValidCounter(arg1))
+                    Counters[arg1] = -Counters[arg1];
                 cc++;
                 break;
             case 105:
                 debug_print("AND counter %d with counter %d\n", arg2, arg1);
-                Counters[arg2] = ca1 & ca2;
+                if (IsValidCounter(arg2))
+                    Counters[arg2] = ca1 & ca2;
                 cc += 2;
                 break;
             case 106:
                 debug_print("OR counter %d with counter %d\n", arg2, arg1);
-                Counters[arg2] = ca1 | ca2;
+                if (IsValidCounter(arg2))
+                    Counters[arg2] = ca1 | ca2;
                 cc += 2;
                 break;
             case 107:
                 debug_print("XOR counter %d with counter %d\n", arg2, arg1);
-                Counters[arg2] = ca1 ^ ca2;
+                if (IsValidCounter(arg2))
+                    Counters[arg2] = ca1 ^ ca2;
                 cc += 2;
                 break;
             case 108:
                 debug_print("Put random number (1 to 100) in counter %d\n", arg1);
-                uint64_t rv = (uint64_t)rand() << 6;
-                rv &= 0xffffffff;
-                rv %= 100 + 1;
-                Counters[arg1] = rv;
+                if (IsValidCounter(arg1))
+                    Counters[arg1] = 1 + erkyrath_random() % 100;
                 cc++;
                 break;
             case 109:
                 debug_print("Clear counter %d\n", arg1);
-                Counters[arg1] = 0;
+                if (IsValidCounter(arg1))
+                    Counters[arg1] = 0;
                 cc++;
                 break;
             case 110:
                 debug_print("System command %d %d\n", arg1, arg2);
-                SysCommand(arg1, arg2);
                 cc += 2;
+                /* The second argument can be a two-byte one too */
+                if (arg2 & 128) {
+                    arg2 = (arg2 & 127) * 256 + arg3;
+                    cc++;
+                }
+                if (SysCommand(arg1, arg2)) {
+                    found_match = 0;
+                    command_done = 0;
+                    keep_going = 1;
+                    done = 1;
+                    startover = 1;
+                }
                 break;
             case 111:
                 debug_print("Start over\n");
+                found_match = 0;
+                command_done = 0;
                 keep_going = 1;
                 done = 1;
                 startover = 1;
@@ -1794,47 +2093,56 @@ static ActionResultType PerformLine(int ct)
                 loop = 1;
                 break;
             case 113:
+                /* After a 115 the loop back does not happen: the loop
+                   is dropped and the rest of the line runs. */
+                if (pop_at_loopback) {
+                    debug_print("Loop back: leaving the loop instead\n");
+                    pop_at_loopback = 0;
+                    PopLoop();
+                    break;
+                }
                 debug_print("Loop back\n");
                 return ACT_LOOP;
             case 114:
-                // 114 and 115 are now functionally the same, so at least one of them is wrong.
-                // 114 is supposed to be instant while 115 is supposed to
-                // do a 114 at the next loopback (113).
-                // Things seems to work fine this way, however, and I'm not even sure what
-                // the difference would be in practice.
                 debug_print("Remove a loop from stack\n");
-                loops[loop_index] = 0;
-                if (loop_index > 0)
-                    loop_index--;
+                PopLoop();
                 break;
             case 115:
+                /* Unlike 114 this leaves the loop on the stack until
+                   the next 113, so the lines up to it still run inside
+                   the loop. */
                 debug_print("Remove a loop from stack at next loopback\n");
-                if (loop_index > 0)
-                    loop_index--;
+                pop_at_loopback = 1;
                 break;
             case 116:
                 debug_print("Continue looking for commands\n");
                 debug_print("found_match = 0, domore = 1, done = 1\n");
                 found_match = 0;
+                command_done = 0;
                 keep_going = 1;
                 done = 1;
                 break;
             case 117:
+                /* After a 116 this turns "I don't understand" into
+                   "I can't do that yet". The original does not touch
+                   flag 33 here. */
                 debug_print("Set found_match to 1\n");
                 found_match = 1;
-                SetBit(MATCHBIT);
                 break;
             case 118:
-                debug_print("Set done to 1\n");
-                done = 1;
+                /* After a 116 this takes back the complaint, without
+                   ending the line or the search for more actions. */
+                debug_print("Set command_done to 1\n");
+                command_done = 1;
                 break;
             case 119:
                 cc++;
                 if (arg1 >= 128) {
                     arg1 = commands[cc++] - 76;
                 }
-                debug_print("Set command prompt to string arg %d (%s)\n", arg1, Messages[arg1]);
-                ProtagonistString = arg1;
+                debug_print("Set command prompt to string arg %d\n", arg1);
+                if (arg1 >= 0 && arg1 <= GameHeader.NumMessages)
+                    ProtagonistString = arg1;
                 break;
             case 120:
                 debug_print("counter 48: verb, counter 49: noun, counter 50: preposition, counter 51: adverb, counter 52: participle, counter 53: noun 2\n");
@@ -1851,15 +2159,18 @@ static ActionResultType PerformLine(int ct)
                 keep_going = 1;
                 done = 1;
                 found_match = 0;
+                command_done = 0;
                 break;
             case 122:
                 debug_print("Print object %d with article\n", object);
-                Display(Bottom, "%s%s", IndefiniteArticle(Items[object].Text), Items[object].Text);
+                if (IsValidItem(object))
+                    Display(Bottom, "%s%s", IndefiniteArticle(Items[object].Text), Items[object].Text);
                 cc += 1 + plus_one_arg;
                 break;
             case 123:
                 debug_print("Add counter %d to counter %d.\n", arg1, arg2);
-                Counters[arg2] += ca1;
+                if (IsValidCounter(arg2))
+                    Counters[arg2] += ca1;
                 cc += 2;
                 break;
             case 124:
@@ -1876,12 +2187,14 @@ static ActionResultType PerformLine(int ct)
                 break;
             case 126:
                 debug_print("Counter %d = Counter (Counter %d (%d))\n", arg1, arg2, ca2);
-                Counters[arg1] = Counters[ca2];
+                if (IsValidCounter(arg1) && IsValidCounter(ca2))
+                    Counters[arg1] = Counters[ca2];
                 cc += 2;
                 break;
             case 127:
                 debug_print("Counter (Counter %d (%d)) = Counter %d\n", arg2, ca2, arg1);
-                Counters[ca2] = Counters[arg1];
+                if (IsValidCounter(arg1) && IsValidCounter(ca2))
+                    Counters[ca2] = Counters[arg1];
                 cc += 2;
                 break;
             case 128:
@@ -1913,6 +2226,18 @@ static ActionResultType PerformLine(int ct)
     }
 }
 
+/* Check whether the player's input matches the "extra words" (adverbs,
+   prepositions, participles + second nouns) attached to action entry ct.
+   The Plus format stores these as typed word records alongside the main
+   verb/noun, enabling commands like "CAREFULLY THROW BALL AT WALL". */
+/* Does an extra word of an action match what the player typed (current)?
+   0 matches anything, and 1 (NONE) matches when the player typed no word
+   of this kind. */
+static int WordMatches(int wordval, int current)
+{
+    return (wordval == current || wordval == 0 || (wordval == 1 && current == 0));
+}
+
 static int IsExtraWordMatch(int ct)
 {
     /* If the action has no "extra words" the command must contain no participle */
@@ -1938,20 +2263,23 @@ static int IsExtraWordMatch(int ct)
         case 1: /* adverb */
             debug_print("(adverb \"%s\")\n", Adverbs[GetAnyDictWord(wordval, Adverbs)].Word);
             foundadverb = 1;
-            if (wordval == CurrentAdverb || wordval == 0 || (wordval == 1 && CurrentAdverb == 0))
+            if (WordMatches(wordval, CurrentAdverb)) {
+                debug_print("Matched adverb %d\n", wordval);
                 matchedadverb = 1;
-            debug_print("Matched adverb %d\n", wordval);
+            }
             break;
-        case 2: /* participle */
+        case 2: { /* participle, followed by the noun that goes with it */
+            /* (Participles are in the same dictionary as prepositions) */
             debug_print("(participle \"%s\")\n", Prepositions[GetAnyDictWord(wordval, Prepositions)].Word);
-            i++;
             foundpartp = 1;
-            uint8_t n2 = Actions[ct].Words[i];
-                debug_print("(object (word %d) \"%s\")\n", i, Nouns[GetAnyDictWord(n2, Nouns)].Word);
+            i++;
+            /* The noun is missing if the participle is the last word */
+            uint8_t n2 = (i < Actions[ct].NumWords) ? Actions[ct].Words[i] : 0;
+            debug_print("(object (word %d) \"%s\")\n", i, Nouns[GetAnyDictWord(n2, Nouns)].Word);
             if (CurrentPartp == 0 && wordval > 1 && !IsNextParticiple(wordval, n2)) {
                 break;
             }
-            if (wordval == CurrentPartp || wordval == 0 || (wordval == 1 && CurrentPartp == 0)) { /* 1 means NONE */
+            if (WordMatches(wordval, CurrentPartp)) {
                 debug_print("Matched participle %d\n", wordval);
                 if (n2 == CurrentNoun2 || n2 == 0) {
                     debug_print("Matched object %d (%s)\n", n2, Nouns[GetDictWord(n2)].Word);
@@ -1959,10 +2287,11 @@ static int IsExtraWordMatch(int ct)
                 }
             }
             break;
+        }
         case 3: /* preposition */
             debug_print("(preposition \"%s\")\n", Prepositions[GetAnyDictWord(wordval, Prepositions)].Word);
             foundprep = 1;
-            if (CurrentPrep == wordval || wordval == 0 || (wordval == 1 && CurrentPrep == 0)) {
+            if (WordMatches(wordval, CurrentPrep)) {
                 debug_print("Matched preposition %d\n", wordval);
                 matchedprep = 1;
             }
@@ -1982,9 +2311,11 @@ static int IsExtraWordMatch(int ct)
     return 1;
 }
 
+/* Check if an implicit (verb=0) action should fire. These are triggered
+   by a random percentage chance (NounOrChance), or unconditionally if
+   doagain is set (chained from a previous action via ACT_CONTINUE). */
 static int IsImplicitMatch(int ct, int doagain)
 {
-
     if (RandomPercent(Actions[ct].NounOrChance)) {
         return 1;
     }
@@ -1995,9 +2326,12 @@ static int IsImplicitMatch(int ct, int doagain)
     return 0;
 }
 
+/* Check if an explicit (verb!=0) action matches the current input.
+   Matches when the verb matches and either the noun matches or is
+   a wildcard (0). Also checks extra words (adverbs, prepositions).
+   When doagain is set, verb-0 continuation entries also match. */
 static int IsMatch(int ct, int doagain)
 {
-
     int verbvalue = Actions[ct].Verb;
     int nounvalue = Actions[ct].NounOrChance;
 
@@ -2027,6 +2361,44 @@ static int IsMatch(int ct, int doagain)
     return 0;
 }
 
+/* Update the action table scan after line *ct returned actresult:
+   start or stop a chain of continuation lines, and push, pop or jump
+   back to a loop. Returns 1 if the game is over and the scan must stop. */
+static int ApplyActionResult(ActionResultType actresult, int *ct, int *chain_on)
+{
+    switch (actresult) {
+    case ACT_CONTINUE:
+        *chain_on = 1;
+        break;
+    case ACT_DONE:
+        *chain_on = 0;
+        PopLoop();
+        break;
+    case ACT_LOOP_BEGIN:
+        loop_index++;
+        if (loop_index >= MAX_LOOPS)
+            Fatal("Loop stack overflow");
+        loops[loop_index] = *ct;
+        *chain_on = 1;
+        break;
+    case ACT_LOOP:
+        if (loop_index) {
+            *ct = loops[loop_index];
+        }
+        break;
+    case ACT_GAMEOVER:
+        return 1;
+    default:
+        break;
+    }
+    return 0;
+}
+
+/* Run all implicit (automatic) actions — those with verb=0 at the start
+   of the action table. These fire each turn before the player is prompted,
+   handling timed events, NPC behaviour, and game-state updates. Supports
+   chaining (ACT_CONTINUE), loops (ACT_LOOP), and restart (startover).
+   Stops early if STOPTIMEBIT is set and no chain is active. */
 static CommandResultType PerformImplicit(void)
 {
     int ct = 0;
@@ -2034,6 +2406,7 @@ static CommandResultType PerformImplicit(void)
     int chain_on = 0;
     startover = 0;
     loop_index = 0;
+    pop_at_loopback = 0;
 
     while (ct <= GameHeader.NumActions) {
         int verbvalue = Actions[ct].Verb;
@@ -2046,33 +2419,8 @@ static CommandResultType PerformImplicit(void)
 
             if (actresult != ACT_FAILURE) {
                 result = ER_SUCCESS;
-                switch (actresult) {
-                case ACT_CONTINUE:
-                    chain_on = 1;
-                    break;
-                case ACT_DONE:
-                    chain_on = 0;
-                    loops[loop_index] = 0;
-                    if (loop_index)
-                        loop_index--;
-                    break;
-                case ACT_LOOP_BEGIN:
-                    loop_index++;
-                    if (loop_index >= MAX_LOOPS)
-                        Fatal("Loop stack overflow");
-                    loops[loop_index] = ct;
-                    chain_on = 1;
-                    break;
-                case ACT_LOOP:
-                    if (loop_index) {
-                        ct = loops[loop_index];
-                    }
-                    break;
-                case ACT_GAMEOVER:
+                if (ApplyActionResult(actresult, &ct, &chain_on))
                     return ER_SUCCESS;
-                default:
-                    break;
-                }
             }
         }
 
@@ -2095,18 +2443,30 @@ static CommandResultType PerformImplicit(void)
     return result;
 }
 
+/* Run the explicit (player-input) action table. Scans for actions whose
+   verb/noun match the current input, tests their conditions, and executes
+   commands. Returns ER_RAN_ALL_LINES_NO_MATCH when no action matched the
+   words ("I don't understand") and ER_RAN_ALL_LINES when one matched but
+   none ran ("I can't do that yet"). Sets MATCHBIT, which the games can
+   test, when vocabulary matches but conditions fail.
+   Supports the same chaining, loops, and restart mechanisms as PerformImplicit. */
 static CommandResultType PerformExplicit(void)
 {
     int ct = 0;
-    CommandResultType result = ER_RAN_ALL_LINES_NO_MATCH;
     int chain_on = 0;
     keep_going = 1;
     startover = 0;
     loop_index = 0;
+    pop_at_loopback = 0;
     found_match = 0;
+    command_done = 0;
     ResetBit(MATCHBIT);
     NounObject = MatchUpItem(CurrentNoun, -1);
     Noun2Object = MatchUpItem(CurrentNoun2, -1);
+
+    int first_explicit = 0;
+    while (first_explicit <= GameHeader.NumActions && Actions[first_explicit].Verb == 0)
+        first_explicit++;
 
     while (ct <= GameHeader.NumActions) {
         int verbvalue, nounvalue;
@@ -2117,46 +2477,26 @@ static CommandResultType PerformExplicit(void)
             chain_on = 0;
         }
 
-        if (IsMatch(ct, chain_on)) {
+        /* While ALWAYSMATCH is set, the first explicit action runs
+           whatever the player typed. X-Men hangs its handling of commands
+           given to other characters on this. The interpreters of the two
+           earliest games do not have it, and Buckaroo Banzai uses the
+           flag as an ordinary one (it stays set after GET). */
+        int always = (CurrentGame != SPIDERMAN && CurrentGame != BANZAI && ct == first_explicit && IsSet(ALWAYSMATCH));
+        if (always)
+            found_match = 1;
+
+        if (always || IsMatch(ct, chain_on)) {
             ActionResultType actresult = PerformLine(ct);
 
             if (actresult != ACT_FAILURE) {
                 if (actresult != ACT_DONE)
                     ResetBit(MATCHBIT);
-                if (found_match) {
+                if (found_match)
                     keep_going = 0;
-                    result = ER_SUCCESS;
-                } else {
-                    result = ER_RAN_ALL_LINES;
-                }
 
-                switch (actresult) {
-                case ACT_CONTINUE:
-                    chain_on = 1;
-                    break;
-                case ACT_DONE:
-                    chain_on = 0;
-                    loops[loop_index] = 0;
-                    if (loop_index)
-                        loop_index--;
-                    break;
-                case ACT_LOOP_BEGIN:
-                    loop_index++;
-                    if (loop_index >= MAX_LOOPS)
-                        Fatal("Loop stack overflow");
-                    loops[loop_index] = ct;
-                    chain_on = 1;
-                    break;
-                case ACT_LOOP:
-                    if (loop_index) {
-                        ct = loops[loop_index];
-                    }
-                    break;
-                case ACT_GAMEOVER:
+                if (ApplyActionResult(actresult, &ct, &chain_on))
                     return ER_SUCCESS;
-                default:
-                    break;
-                }
             } else {
                 if (verbvalue == CurrentVerb && (nounvalue == CurrentNoun || nounvalue == 0))
                     SetBit(MATCHBIT);
@@ -2178,14 +2518,23 @@ static CommandResultType PerformExplicit(void)
             break;
     }
 
-    if (result == ER_RAN_ALL_LINES_NO_MATCH && IsSet(MATCHBIT))
-        result = ER_RAN_ALL_LINES;
-
-    return result;
+    /* As in the original: no action matched the words (or the last one
+       that did took it back with 116), or one matched but none ran */
+    if (!found_match)
+        return ER_RAN_ALL_LINES_NO_MATCH;
+    if (!command_done)
+        return ER_RAN_ALL_LINES;
+    return ER_SUCCESS;
 }
 
-glkunix_argumentlist_t glkunix_arguments[10];
+/* Plus takes no options, only the name of the game file. */
+glkunix_argumentlist_t glkunix_arguments[] = {
+    { "", glkunix_arg_ValueFollows, "filename    file to load" },
+    { NULL, glkunix_arg_End, NULL }
+};
 
+/* Glk startup hook: extract the game file path from command-line arguments
+   and split it into DirPath + filename for image file lookups. */
 int glkunix_startup_code(glkunix_startup_t *data)
 {
     int argc = data->argc;
@@ -2223,21 +2572,24 @@ int glkunix_startup_code(glkunix_startup_t *data)
     return 1;
 }
 
-void ResizeTitleImage(void)
+/* Recalculate scaling and offsets for the title screen image, centring
+   it both horizontally and vertically (⅓ from top). */
+static void ResizeTitleImage(void)
 {
-    glui32 graphwidth, graphheight, optimal_width, optimal_height;
+    glui32 graphheight, optimal_height;
 #ifdef SPATTERLIGHT
     glk_window_set_background_color(Graphics, gbgcol);
     glk_window_clear(Graphics);
 #endif
-    glk_window_get_size(Graphics, &graphwidth, &graphheight);
-    pixel_size = OptimalPictureSize(&optimal_width, &optimal_height);
-    x_offset = ((int)graphwidth - (int)optimal_width) / 2;
-    right_margin = optimal_width + x_offset;
+    FitImageToGraphicsWindow(&graphheight, &optimal_height);
     y_offset = ((int)graphheight - (int)optimal_height) / 3;
 }
 
-void DrawTitleImage(void)
+/* Display the title screen (image "S000") in a full-window graphics view.
+   Waits for a keypress to proceed, handling resize and colour-cycling
+   events while waiting. Closes all windows and reinitialises the normal
+   three-window layout when done. */
+static void DrawTitleImage(void)
 {
     DisplayInit();
 #ifdef SPATTERLIGHT
@@ -2261,8 +2613,7 @@ void DrawTitleImage(void)
 
     if (DrawImageWithName("S000")) {
 
-        if (CurrentSys == SYS_APPLE2)
-            DrawApple2ImageFromVideoMem();
+        ShowApple2Screen();
 
         event_t ev;
         do {
@@ -2275,8 +2626,7 @@ void DrawTitleImage(void)
                 ResizeTitleImage();
                 glk_window_clear(Graphics);
                 DrawImageWithName("S000");
-                if (CurrentSys == SYS_APPLE2)
-                    DrawApple2ImageFromVideoMem();
+                ShowApple2Screen();
             } else if (ev.type == evtype_Timer) {
                 if (ColorCyclingRunning)
                     UpdateColorCycling();
@@ -2291,36 +2641,43 @@ void DrawTitleImage(void)
     DisplayInit();
 }
 
+/* Main entry point. Loads the game database (trying plaintext first, then
+   binary formats for Atari 8-bit, Atari ST, Apple II, and C64), shows the
+   title screen, and enters the main game loop:
+     1. Run implicit (automatic) actions
+     2. Display the room
+     3. Get player input
+     4. Run explicit (player-command) actions
+     5. Report errors if no action matched */
 void glk_main(void)
 {
     if (game_file == NULL)
         Fatal("No game file");
 
+    /* Initialize system messages, preferring first-person ("I am") forms */
     for (int i = 0; i < MAX_SYSMESS; i++) {
         sys[i] = sysdict[i];
         if (sysdict_i_am[i])
             sys[i] = sysdict_i_am[i];
     }
 
-    FILE *f = fopen(game_file, "r");
+    FILE *f = fopen(game_file, "rb");
     if (f == NULL)
         Fatal("Cannot open game");
 
-    if (LoadDatabasePlaintext(f, DEBUG_ACTIONS) == UNKNOWN_GAME) {
-        fseek(f, 0, SEEK_END);
-        memlen = ftell(f);
-        if (memlen == -1) {
-            fclose(f);
-            Fatal("Game file empty");
-        }
+    size_t filesize = GetFileLength(f);
 
+    if (filesize == 0) {
+        fclose(f);
+        Fatal("Game file empty");
+    }
+
+    /* Try loading as plaintext database first; if that fails, attempt
+       binary format detection for each supported platform */
+    if (LoadDatabasePlaintext(f, DEBUG_PRINT) == UNKNOWN_GAME) {
         fseek(f, 0, SEEK_SET);
-        mem = malloc(memlen);
-        if (!mem) {
-            Fatal("Out of memory");
-        }
-
-        memlen = fread(mem, 1, memlen, f);
+        mem = MemAlloc(filesize);
+        memlen = fread(mem, 1, filesize, f);
         fclose(f);
 
         if (!DetectAtari8(&mem, &memlen)) {
@@ -2335,15 +2692,23 @@ void glk_main(void)
 
         if (CurrentSys == SYS_APPLE2)
             LookForApple2Images();
+
+        if (CurrentSys == SYS_C64 && CurrentGame == SPIDERMAN)
+            PatchSpidermanImages();
     }
+
+    /* A game without pictures still has a list of them, an empty one,
+       so that the drawing code need not check */
+    if (Images == NULL)
+        Images = NewImageList(0);
 
 #ifdef SPATTERLIGHT
     UpdateSettings();
     if (gli_determinism)
-        srand(1234);
+        set_erkyrath_random(1234);
     else
 #endif
-        srand((unsigned int)time(NULL));
+    set_erkyrath_random(0);
 
     DrawTitleImage();
     UpdateSettings();
@@ -2351,12 +2716,14 @@ void glk_main(void)
     InitAnimationBuffer();
     InitialState = SaveCurrentState();
 
+    /* --- Main game loop --- */
     while (1) {
         glk_tick();
 
         if (should_restart)
             RestartGame();
 
+        /* Run automatic actions unless time is stopped or we just restored */
         if (IsSet(STOPTIMEBIT) || JustRestored) {
             ResetBit(STOPTIMEBIT);
         } else {
@@ -2370,7 +2737,7 @@ void glk_main(void)
         if (should_restart)
             continue;
 
-        // For Thing in tar image
+        /* Restore a saved object image overlay (e.g. Thing in Fantastic Four) */
         if (JustRestored && SavedImgType == IMG_OBJECT) {
             DrawItemImage(SavedImgIndex);
         }
@@ -2383,6 +2750,7 @@ void glk_main(void)
 
         SetCountersFromInput();
 
+        /* Save current input as "last" for AGAIN/repeat commands */
         LastVerb = CurrentVerb;
         LastNoun = CurrentNoun;
         LastPrep = CurrentPrep;
@@ -2394,7 +2762,8 @@ void glk_main(void)
 
         CommandResultType result = PerformExplicit();
 
-        if (result == ER_RAN_ALL_LINES_NO_MATCH || result == ER_RAN_ALL_LINES || IsSet(MATCHBIT)) {
+        /* If no action fully matched, report the appropriate error */
+        if (result != ER_SUCCESS) {
             if (result == ER_RAN_ALL_LINES_NO_MATCH)
                 SystemMessage(I_DONT_UNDERSTAND);
             else

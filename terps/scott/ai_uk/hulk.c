@@ -5,13 +5,15 @@
 //  Created by Petter Sjölund on 2022-01-18.
 //
 
-#include "hulk.h"
 #include "apple2draw.h"
+#include "game_specific.h"
+#include "hulk.h"
 #include "saga.h"
 #include "sagagraphics.h"
 #include "scott.h"
+#include "scott_display.h"
 
-void HulkShowImageOnExamineUS(int noun)
+static void HulkShowImageOnExamineUS(int noun)
 {
     if (!Graphics)
         return;
@@ -24,16 +26,16 @@ void HulkShowImageOnExamineUS(int noun)
         break;
     case 124: // Bio-Gem
     case 41:
-        if (Items[18].Location == MyLoc || Items[18].Location == CARRIED)
+        if (IsPresent(18))
             image = 1;
         break;
     case 108:
-        if (Items[17].Location == MyLoc || Items[17].Location == CARRIED)
+        if (IsPresent(17))
             // Natter energy egg
             image = 2;
         break;
     case 72:
-        if (Items[20].Location == MyLoc || Items[20].Location == CARRIED)
+        if (IsPresent(20))
             // Alien army ants
             image = 3;
         break;
@@ -58,16 +60,7 @@ void HulkShowImageOnExamineUS(int noun)
         break;
     }
 
-    if (image >= 0) {
-        glk_window_clear(Graphics);
-        if (DrawUSRoom(90 + image)) {
-            showing_closeup = 1;
-            if (CurrentSys == SYS_APPLE2)
-                DrawApple2ImageFromVideoMem();
-            Output(sys[HIT_ENTER]);
-            HitEnter();
-        }
-    }
+    ShowUSCloseup(image, 90);
 }
 
 void HulkShowImageOnExamine(int noun)
@@ -84,13 +77,13 @@ void HulkShowImageOnExamine(int noun)
             image = 28;
         break;
     case 108:
-        if (Items[17].Location == MyLoc || Items[17].Location == CARRIED)
+        if (IsPresent(17))
             // Natter energy egg
             image = 30;
         break;
     case 124: // Bio-Gem
     case 41:
-        if (Items[18].Location == MyLoc || Items[18].Location == CARRIED)
+        if (IsPresent(18))
             image = 29;
         break;
     case 21: // Killer Bees
@@ -108,12 +101,8 @@ void HulkShowImageOnExamine(int noun)
     default:
         break;
     }
-    if (image) {
-        DrawImage(image);
-        showing_closeup = 1;
-        Output(sys[HIT_ENTER]);
-        HitEnter();
-    }
+    if (image)
+        ShowCloseup(image);
 }
 
 void HulkLook(void)
@@ -134,43 +123,42 @@ void HulkLook(void)
 
 void DrawHulkImage(int p)
 {
-    if (CurrentGame == HULK_US) {
-        if (DrawUSRoom(p)) {
-            showing_closeup = 1;
-            if (CurrentSys == SYS_APPLE2)
-                DrawApple2ImageFromVideoMem();
-            Output(sys[HIT_ENTER]);
-            HitEnter();
-        }
-        return;
-    }
     int image = 0;
     switch (p) {
     case 85:
+        /* Hulk lifts dome */
         image = 34;
         break;
     case 86:
+        /* Gas turns Hulk into Banner */
         image = 35;
         break;
     case 83:
+        /* Chair breaks */
         image = 36;
         break;
     case 84:
+        /* Banner becomes Hulk */
         image = 37;
         break;
     case 87:
+        /* Victory: Chief Examiner and gems */
         image = 38;
         break;
     case 88:
+        /* Hulk thinks about Nightmare */
         image = 39;
         break;
     case 89:
+        /* Hulk digs */
         image = 40;
         break;
     case 82:
+        /* Banner looks into mirror */
         image = 41;
         break;
     case 81:
+        /* Hulk looks into mirror */
         image = 42;
         break;
     default:
@@ -178,10 +166,6 @@ void DrawHulkImage(int p)
         break;
     }
 
-    if (image != 0) {
-        DrawImage(image);
-        showing_closeup = 1;
-        Output(sys[HIT_ENTER]);
-        HitEnter();
-    }
+    if (image != 0)
+        ShowCloseup(image);
 }

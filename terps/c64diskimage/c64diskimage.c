@@ -493,6 +493,8 @@ DiskImage *di_create_from_data(uint8_t *data, int length)
     case D64ERRSIZE: /* D64 with error info */
         // di->errinfo = &(di->error_);
         // fallthrough
+    case D64_40SIZE: /* 40 track D64, with or without error info. */
+    case D64_40ERRSIZE: /* The extra tracks 36 to 40 are not read. */
     case D64SIZE: /* standard D64 */
         di->type = D64;
         di->bam.track = 18;
@@ -563,7 +565,7 @@ static int match_pattern(unsigned char *rawpattern, unsigned char *rawname)
     return 1;
 }
 
-RawDirEntry *find_largest_file_entry(DiskImage *di)
+RawDirEntry *di_find_largest_file_entry(DiskImage *di)
 {
     unsigned char *buffer;
     TrackSector ts;
@@ -588,7 +590,7 @@ RawDirEntry *find_largest_file_entry(DiskImage *di)
     return largest;
 }
 
-char **get_all_file_names(DiskImage *di, int *numfiles)
+char **di_get_all_file_names(DiskImage *di, int *numfiles)
 {
     unsigned char *buffer;
     TrackSector ts;
@@ -949,4 +951,38 @@ int di_read(ImageFile *imgfile, unsigned char *buffer, int len)
         }
     }
     return counter;
+}
+
+/* Read an open file (at most 0xffff bytes) into a newly allocated
+   buffer, which the caller must free, and close the file. Sets *length
+   to the number of bytes read. Returns NULL if out of memory. */
+uint8_t *di_read_file(ImageFile *imgfile, size_t *length)
+{
+    uint8_t buf[0xffff];
+    int bytesread = di_read(imgfile, buf, 0xffff);
+    free(imgfile);
+    *length = bytesread;
+    /* Allocate at least one byte, so that an empty file is not mistaken
+       for a failure */
+    uint8_t *file = malloc(bytesread > 0 ? bytesread : 1);
+    if (file)
+        memcpy(file, buf, bytesread);
+    return file;
+}
+
+uint8_t *di_get_file_named(uint8_t *data, size_t length, size_t *newlength,
+                        const char *name)
+{
+    uint8_t *file = NULL;
+    *newlength = 0;
+    DiskImage *d64 = di_create_from_data(data, (int)length);
+    unsigned char rawname[100];
+    di_rawname_from_name(rawname, name);
+    if (d64) {
+        ImageFile *c64file = di_open(d64, rawname, 0xc2, "rb");
+        if (c64file)
+            file = di_read_file(c64file, newlength);
+        free(d64);
+    }
+    return file;
 }

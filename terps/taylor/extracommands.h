@@ -8,11 +8,7 @@
 #ifndef extracommands_h
 #define extracommands_h
 
-#include <stdio.h>
-
 int TryExtraCommand(void);
-int ParseExtraCommand(char *p);
-
-#define EXTRA_COMMAND 0xffff
+int ParseExtraCommand(const char *p);
 
 #endif /* extracommands_h */

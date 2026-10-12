@@ -23,6 +23,8 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 
 #define D64SIZE 174848
 #define D64ERRSIZE 175531
+#define D64_40SIZE 196608
+#define D64_40ERRSIZE 197376
 #define D71SIZE 349696
 #define D71ERRSIZE 351062
 #define D81SIZE 819200
@@ -92,12 +94,15 @@ ImageFile *di_open(DiskImage *di, unsigned char *rawname, FileType type,
                    char *mode);
 ImageFile *di_create_file_from_ts(DiskImage *di, int track, int sector);
 int di_read(ImageFile *imgfile, unsigned char *buffer, int len);
+uint8_t *di_read_file(ImageFile *imgfile, size_t *length);
 int di_rawname_from_name(unsigned char *rawname, const char *name);
 
-RawDirEntry *find_largest_file_entry(DiskImage *di);
+RawDirEntry *di_find_largest_file_entry(DiskImage *di);
 DiskImage *di_create_from_data(uint8_t *data, int length);
 
 /* returns an array of strings containing all file names */
-char **get_all_file_names(DiskImage *di, int *numfiles);
+char **di_get_all_file_names(DiskImage *di, int *numfiles);
+
+uint8_t *di_get_file_named(uint8_t *data, size_t length, size_t *newlength, const char *name);
 
 #endif /* diskimage_h */
