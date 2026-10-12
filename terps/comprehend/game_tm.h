@@ -1,0 +1,105 @@
+/* ScummVM - Graphic Adventure Engine
+ *
+ * ScummVM is the legal property of its developers, whose names
+ * are too numerous to list here. Please refer to the COPYRIGHT
+ * file distributed with this source distribution.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+#ifndef GLK_COMPREHEND_GAME_TM_H
+#define GLK_COMPREHEND_GAME_TM_H
+
+#include "game_opcodes.h"
+
+namespace Glk {
+namespace Comprehend {
+
+class TalismanGame : public ComprehendGameV2 {
+private:
+	Common::String _savedAction;
+
+	// Saved room for the special-opcode 3/4 save/restore pair (NOVEL.EXE
+	// 0x9591). Special 3 stores the current room here; special 4 returns to it.
+	uint8 _savedRoom = 0;
+
+	// True once the player has crossed into part 2 (the desert). Talisman is a
+	// two-part game: part 2 is an entirely separate game database living in its
+	// own "g0" on the Lands Beyond disk (magic 0x94c6), with its own rooms,
+	// items, functions and string banks. enterPart2() swaps it in.
+	bool _inPart2 = false;
+private:
+	/**
+	 * Switch from part 1 to part 2 (the desert): make the Lands Beyond disk
+	 * active, reload its game data and strings, carry over the player's flags
+	 * and variables, and drop the player onto the ship's deck (room 51).
+	 */
+	void enterPart2();
+#ifdef COMPREHEND_DEBUG
+	void dumpDatabase(const char *path);
+#endif
+private:
+	/**
+	 * Load strings from the executable
+	 */
+	void loadStrings();
+
+	/**
+	 * Load strings from the Apple II disk's MA-MO bank files instead of
+	 * novel.exe (15 banks of 64; banks 0-7 -> _strings, 8-14 -> _strings2).
+	 */
+	void loadStringsApple();
+
+	/**
+	 * Apple II part-2 (desert) string loader: places the room banks (MA,MB) in
+	 * _strings and the message banks (MQ-MW) into _strings2 at offset 0x200, the
+	 * gapped layout the part-2 bytecode addresses via string tables 0x84/0x85.
+	 */
+	void loadStringsApplePart2();
+public:
+	TalismanGame();
+	~TalismanGame() override {}
+
+	void prepareRestore(const std::vector<byte> &payload) override;
+	void playGame() override;
+	void beforeGame() override;
+	void beforeTurn() override;
+	void beforePrompt() override;
+	void afterPrompt() override;
+	void handleAction(Sentence *sentence) override;
+	void handleSpecialOpcode() override;
+	void restartGame() override;
+
+private:
+	/**
+	 * Present the death / game-over menu (special opcode 2): Quit, restart
+	 * ("a new adventure"), or restore a saved game.
+	 */
+	void deathMenu();
+
+	// The other special opcodes that do something, one method each
+	// (handleSpecialOpcode() is just the dispatch).
+	void specialSaveRoom();          // 3
+	void specialRestoreRoom();       // 4
+	void specialTextMode();          // 15
+	void specialBoatDeparture();     // 16
+	void specialGraphicsMode();      // 17
+	void specialNpcConversation();   // 20
+};
+
+} // namespace Comprehend
+} // namespace Glk
+
+#endif

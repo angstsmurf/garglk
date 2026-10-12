@@ -54,6 +54,7 @@ interpreters have been compiled for Gargoyle and are included in the package:
 * Agility
 * Alan 2 and 3
 * Bocfel
+* Comprehend
 * Git
 * Glulxe
 * Hugo

@@ -62,6 +62,7 @@
 #define T_AGT       "agility"
 #define T_ALAN2     "alan2"
 #define T_ALAN3     "alan3"
+#define T_COMPREHEND "comprehend"
 #define T_GLULX     "git"
 #define T_HUGO      "hugo"
 #define T_JACL      "jacl"
@@ -99,6 +100,7 @@ enum class Format {
     AGT,
     Alan2,
     Alan3,
+    Comprehend,
     Glulx,
     Hugo,
     JACL,
@@ -127,6 +129,9 @@ static std::optional<Format> probe(const std::array<char, 32> &header)
         {R"(^[\s\S]{3}\x9b\x36\x21[\s\S]{18}\xff)", Format::Level9},
         {R"(^\x02(\x07\x05|\x08[\x01\x02\x03\x07]))", Format::Alan2},
         {R"(^ALAN\x03)", Format::Alan3},
+        // The "G0" main data files of the later Comprehend releases have no
+        // extension; they open with a table of ascending offsets.
+        {R"(^(\xf0\x93\xf1\x93|\x29\xa4\x31\xa4|\xc3\x8b\xcb\x8b))", Format::Comprehend},
     };
 
     for (const auto &[regex, format] : magic) {
@@ -145,6 +150,7 @@ static const std::unordered_map<std::string, Format> extensions = {
     {"d$$", Format::AGT},
     {"acd", Format::Alan2},
     {"a3c", Format::Alan3},
+    {"gda", Format::Comprehend},
     {"ulx", Format::Glulx},
     {"hex", Format::Hugo},
     {"j2", Format::JACL},
@@ -176,6 +182,7 @@ static const std::unordered_map<Format, Interpreter> interpreters = {
     {Format::AGT, Interpreter(T_AGT, {"-gl"})},
     {Format::Alan2, Interpreter(T_ALAN2)},
     {Format::Alan3, Interpreter(T_ALAN3)},
+    {Format::Comprehend, Interpreter(T_COMPREHEND)},
     {Format::Glulx, Interpreter(T_GLULX)},
     {Format::Hugo, Interpreter(T_HUGO)},
     {Format::JACL, Interpreter(T_JACL)},

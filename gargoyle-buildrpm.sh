@@ -112,6 +112,7 @@ ${scare_spec}
 %{_libexecdir}/gargoyle/scott
 %{_libexecdir}/gargoyle/taylor
 %{_libexecdir}/gargoyle/bocfel
+%{_libexecdir}/gargoyle/comprehend
 %{_libexecdir}/gargoyle/jacl
 %{_libexecdir}/gargoyle/tadsr
 %{_libexecdir}/gargoyle/level9

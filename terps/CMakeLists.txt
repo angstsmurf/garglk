@@ -3,6 +3,7 @@ option(WITH_AGILITY "Enable the agility interpreter" ON)
 option(WITH_ALAN2 "Enable the alan2 interpreter" ON)
 option(WITH_ALAN3 "Enable the alan3 interpreter" ON)
 option(WITH_BOCFEL "Enable the bocfel interpreter" ON)
+option(WITH_COMPREHEND "Enable the comprehend interpreter" ON)
 option(WITH_GIT "Enable the git interpreter" ON)
 option(WITH_GLULXE "Enable the glulxe interpreter" ON)
 option(WITH_HUGO "Enable the hugo interpreter" ON)
@@ -199,6 +200,35 @@ if(WITH_BOCFEL)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU$")
         target_compile_options(bocfel PRIVATE "-Wno-sign-compare")
     endif()
+endif()
+
+# ------------------------------------------------------------------------------
+#
+# Comprehend, for the Polarware/Penguin Software Comprehend games
+#
+# From Spatterlight; derived from the ScummVM Comprehend engine.
+#
+if(WITH_COMPREHEND)
+    terp(comprehend
+        SRCS
+        comprehend/apple2.cpp comprehend/comprehend.cpp
+        comprehend/comprehend_compat.cpp comprehend/comprehend_gfx.cpp
+        comprehend/comprehend_io.cpp comprehend/comprehend_state.cpp
+        comprehend/dictionary.cpp comprehend/draw_surface.cpp
+        comprehend/file_buf.cpp comprehend/game.cpp comprehend/game_cc.cpp
+        comprehend/game_cm.cpp comprehend/game_data.cpp comprehend/game_oo.cpp
+        comprehend/game_opcodes.cpp comprehend/game_tm.cpp
+        comprehend/game_tm_load.cpp comprehend/game_tr1.cpp
+        comprehend/game_tr2.cpp comprehend/game_traits.cpp
+        comprehend/glk_main.cpp comprehend/glkstart.c comprehend/gm_backend.cpp
+        comprehend/graphics_magician.cpp comprehend/graphics_magician_cga.cpp
+        comprehend/graphics_magician_dhgr.cpp
+        comprehend/graphics_magician_pcjr.cpp comprehend/pics.cpp
+        common_utils/randomness.c
+        common_sagadraw/gm_artifact.c common_sagadraw/gm_vector.c
+        readwoz/ciderpress.c readwoz/woz2nib.c
+        INCLUDE_DIRS comprehend common_utils common_sagadraw readwoz
+        CXXSTD 14)
 endif()
 
 # ------------------------------------------------------------------------------
