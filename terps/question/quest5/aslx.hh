@@ -1,0 +1,539 @@
+/*
+ * Copyright (C) 2026  Petter Sjölund
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ */
+
+// aslx.hh -- Quest 5 (.aslx / .quest) loader for Question.
+//
+// This is the first piece of the "second engine" described in TODO-quest5.md:
+// a native port of the Quest 5 WorldModel that shares the Glk frontend with the
+// existing ASL text interpreter. Milestone 1 is the loader only -- unzip a
+// .quest package (or read a raw .aslx), parse the XML into a typed element
+// tree, and dump it. Scripts and expressions are stored verbatim here; running
+// them is a later milestone.
+//
+// The data model and the tag/field-loading rules mirror QuestViva's
+// src/Engine/GameLoader (ElementLoaders.cs / AttributeLoaders.cs /
+// ExtendedAttributeLoaders.cs), which is the reference the ground-truth oracle
+// diffs against.
+
+#ifndef QUESTION_ASLX_HH
+#define QUESTION_ASLX_HH
+
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <map>
+#include <memory>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include <locale.h>
+#ifdef __APPLE__
+#include <xlocale.h>
+#endif
+
+namespace aslx {
+
+// Locale-pinned strtod: script/save/game-file numbers are always C-locale
+// ("3.5"), and a host library calling setlocale(LC_ALL, "") must not change
+// how they parse (a comma-decimal locale would truncate every double).
+inline double c_strtod(const char *s, char **end = nullptr) {
+#ifdef _WIN32
+    static _locale_t c_loc = _create_locale(LC_ALL, "C");
+    return _strtod_l(s, end, c_loc);
+#else
+    static locale_t c_loc = newlocale(LC_ALL_MASK, "C", (locale_t)0);
+    return strtod_l(s, end, c_loc);
+#endif
+}
+
+// The writing side: printf's "%.<precision>g" with the decimal point pinned to
+// '.', so a saved double never comes out as a comma-decimal locale's "3,5".
+inline std::string c_format_g(double d, int precision) {
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "%.*g", precision, d);
+    for (char *c = buf; *c; ++c)
+        if (*c == ',') *c = '.';
+    return buf;
+}
+
+struct ValueList;
+struct ValueDict;
+
+// A typed field value. Only the storage side matters for the loader; arithmetic
+// and coercion belong to the expression evaluator (a later milestone). Object
+// references and object lists are "lazy" in Quest -- stored as element names and
+// resolved once the whole tree is loaded -- so we keep them as names here too.
+struct Value {
+    enum class Type {
+        Null,
+        String,
+        Int,
+        Double,
+        Boolean,
+        Script,         // raw script text, run later
+        StringList,     // simplestringlist / stringlist
+        ObjectRef,      // lazy object reference (element name)
+        ObjectList,     // lazy object list (element names)
+        StringDict,     // stringdictionary / simplestringdictionary
+        ObjectDict,     // objectdictionary / simpleobjectdictionary
+        ScriptDict      // scriptdictionary (key -> script text)
+    };
+
+    Type type = Type::Null;
+    std::string declared_type;  // the ASLX type name it was loaded as (for dumps)
+    // Set for a <attr type="listextend">: this list *extends* the same-named
+    // list inherited from the type chain rather than replacing it (QuestViva's
+    // Fields.AddFieldExtension). The merge happens at field-read time.
+    bool list_extend = false;
+
+    std::string str;            // String / Script / ObjectRef
+    long integer = 0;           // Int
+    double dbl = 0.0;           // Double
+    bool boolean = false;       // Boolean
+
+    // StringList / ObjectList and *Dict (ordered) storage. Held behind a
+    // shared_ptr so that lists and dictionaries are REFERENCE types, exactly
+    // like Quest's QuestList<T> / QuestDictionary<T>: copying a Value (function
+    // argument binding, `y = x` assignment, reading a field) shares the same
+    // backing, so `list add`/`dictionary add` through any alias is visible
+    // everywhere. Builtins that derive a *new* collection from an input must
+    // call detach() first (see aslx-runtime-builtins.cc).
+    //
+    // Entries of both are full Values, not strings: Quest's collections hold
+    // typed/boxed entries, and a single list/dictionary can mix objects,
+    // strings, numbers, dictionaries... (spondre builds lists of dictionaries
+    // and indexes them, `match["score"]`; CoreParser's
+    // currentcommandresolvedelements dict holds resolved objects alongside a
+    // boolean `multiple`). The container-level Type enum (StringList/ObjectList,
+    // StringDict/ObjectDict/ScriptDict) is retained only for TypeOf and for the
+    // NewXxx constructors' declared kind -- a loaded StringList holds String
+    // entries and an ObjectList holds ObjectRef entries by construction.
+    using DictEntry = std::pair<std::string, Value>;
+    std::shared_ptr<ValueList> list_store;
+    std::shared_ptr<ValueDict> dict_store;
+
+    // Lazily-allocating accessors so a freshly-typed list/dict Value is usable
+    // without a separate init step. The const overloads return a shared empty
+    // when the store is null (a null list reads as empty, never faults). All
+    // are defined out-of-line (they need Value to be complete).
+    std::vector<Value> &list();
+    const std::vector<Value> &list() const;
+    std::vector<DictEntry> &dict();
+    const std::vector<DictEntry> &dict() const;
+
+    // Give this Value its own private copy of the list/dict backing, breaking
+    // the reference-sharing. Used before building a derived collection.
+    void detach();
+
+    // Allocate the backing for a collection-typed Value if absent. Every
+    // collection CREATION site must end with this invariant: a fresh (even
+    // empty) collection owns a store, because copies alias the store and a
+    // late lazy allocation would happen on one copy only -- .NET reference
+    // semantics require `f(NewStringDictionary())` mutations through the
+    // parameter to be visible to the caller.
+    void ensure_backing();
+
+    // Give this collection, and every collection inside it, the undo logger
+    // (see ValueList::undo_logged).
+    void attach_undo_log();
+
+    std::string debug_string() const;
+};
+
+// The backings: the entries, plus whether changes to them are logged for
+// undo.  A QuestList or QuestDictionary is created without an undo logger and
+// is handed one when it becomes the value of an element's attribute
+// (Fields.Set), or an entry of a collection that has one; only from then on
+// does `list add` to it leave a record.  A list a script builds in a local
+// variable and throws away is never logged at all.  A copy of the entries
+// (QuestList.Clone, detach()) starts without one again.
+struct ValueList : std::vector<Value> {
+    bool undo_logged = false;
+    ValueList() = default;
+    ValueList(const ValueList &o) : std::vector<Value>(o) {}
+    explicit ValueList(const std::vector<Value> &o) : std::vector<Value>(o) {}
+    ValueList &operator=(const ValueList &o) {
+        std::vector<Value>::operator=(o);
+        return *this;
+    }
+    using std::vector<Value>::operator=;
+};
+struct ValueDict : std::vector<Value::DictEntry> {
+    bool undo_logged = false;
+    ValueDict() = default;
+    ValueDict(const ValueDict &o) : std::vector<Value::DictEntry>(o) {}
+    explicit ValueDict(const std::vector<Value::DictEntry> &o)
+        : std::vector<Value::DictEntry>(o) {}
+    ValueDict &operator=(const ValueDict &o) {
+        std::vector<Value::DictEntry>::operator=(o);
+        return *this;
+    }
+    using std::vector<Value::DictEntry>::operator=;
+};
+
+inline std::vector<Value> &Value::list() {
+    if (!list_store)
+        list_store = std::make_shared<ValueList>();
+    return *list_store;
+}
+inline const std::vector<Value> &Value::list() const {
+    static const std::vector<Value> empty;
+    return list_store ? *list_store : empty;
+}
+inline std::vector<Value::DictEntry> &Value::dict() {
+    if (!dict_store)
+        dict_store = std::make_shared<ValueDict>();
+    return *dict_store;
+}
+inline const std::vector<Value::DictEntry> &Value::dict() const {
+    static const std::vector<DictEntry> empty;
+    return dict_store ? *dict_store : empty;
+}
+inline void Value::detach() {
+    if (list_store)
+        list_store = std::make_shared<ValueList>(*list_store);
+    if (dict_store)
+        dict_store = std::make_shared<ValueDict>(*dict_store);
+    ensure_backing();  // a detached collection owns a store even when empty
+}
+
+inline void Value::attach_undo_log() {
+    // Already attached: so is everything in it (UndoLog's setter returns
+    // early the same way), which also ends a self-containing collection.
+    if (list_store && !list_store->undo_logged) {
+        list_store->undo_logged = true;
+        for (Value &entry : *list_store)
+            entry.attach_undo_log();
+    }
+    if (dict_store && !dict_store->undo_logged) {
+        dict_store->undo_logged = true;
+        for (DictEntry &entry : *dict_store)
+            entry.second.attach_undo_log();
+    }
+}
+
+inline void Value::ensure_backing() {
+    switch (type) {
+    case Type::StringList:
+    case Type::ObjectList:
+        list();
+        break;
+    case Type::StringDict:
+    case Type::ObjectDict:
+    case Type::ScriptDict:
+        dict();
+        break;
+    default:
+        break;
+    }
+}
+
+// Value constructors.
+inline Value vnull() { Value v; v.type = Value::Type::Null; return v; }
+inline Value vstr(std::string s) {
+    Value v; v.type = Value::Type::String; v.str = std::move(s); return v;
+}
+inline Value vint(long i) { Value v; v.type = Value::Type::Int; v.integer = i; return v; }
+inline Value vdouble(double d) { Value v; v.type = Value::Type::Double; v.dbl = d; return v; }
+inline Value vbool(bool b) { Value v; v.type = Value::Type::Boolean; v.boolean = b; return v; }
+inline Value vobj(std::string name) {
+    Value v; v.type = Value::Type::ObjectRef; v.str = std::move(name); return v;
+}
+inline Value vscript(std::string source) {
+    Value v; v.type = Value::Type::Script; v.str = std::move(source); return v;
+}
+inline Value vstrlist(std::vector<std::string> l) {
+    Value v; v.type = Value::Type::StringList;
+    v.list();  // allocate the backing so a fresh list has its own identity
+    for (std::string &s : l) v.list().push_back(vstr(std::move(s)));
+    return v;
+}
+inline Value vobjlist(std::vector<std::string> l) {
+    Value v; v.type = Value::Type::ObjectList;
+    v.list();
+    for (std::string &s : l) v.list().push_back(vobj(std::move(s)));
+    return v;
+}
+
+// Element kind: an enum mirror of the `elem_type` string, set whenever
+// elem_type is assigned (elem_kind_from_string). Hot per-turn scans compare the
+// enum instead of the string -- an int compare rather than a memcmp, which the
+// profiler showed dominating Quest 5 playback.
+enum class ElemKind : unsigned char {
+    Other = 0, Object, Command, Verb, Function, Game, Type,
+    Turnscript, Timer, Walkthrough, Exit, Resource, Output,
+    Javascript, Delegate
+};
+ElemKind elem_kind_from_string(const std::string &s);
+
+// One element of the world model: object, command, function, game, type, etc.
+// Containment is by nesting (parent/children). Inheritance is by <inherit> and
+// is recorded here as a list of type names, resolved by the engine later.
+struct Element {
+    std::string name;
+    std::string elem_type;   // "object", "command", "verb", "function", "game",
+                             // "type", "turnscript", "timer", "walkthrough",
+                             // "exit", "resource", "output", "javascript",
+                             // "delegate"
+    ElemKind kind = ElemKind::Other;  // enum mirror of elem_type (see above)
+    // Liveness cache: true iff this element is the current by_name binding, i.e.
+    // find(name)==this. Maintained by World::register_name/unregister_name so
+    // scope walks can test liveness with a bool read instead of a map lookup.
+    bool registered = false;
+    bool anonymous = false;
+    int source_line = 0;
+
+    // Child ordering (QuestViva's SortIndex MetaField): elements start in
+    // creation order; a runtime parent change bumps the element to the end of
+    // its new parent's children (WorldModel.UpdateElementSortOrder). Children
+    // enumerations sort by this.
+    long sort_index = 0;
+
+    // Fields in insertion order (Quest's field bag is unordered, but preserving
+    // order keeps dumps stable and readable). field_index_ maps a field name to
+    // its slot in `fields` so field()/set_field() are O(1) instead of a linear
+    // string scan -- the field-resolution walk (collect_field_chain) reads a
+    // field at every node of the inheritance chain, per attribute, per turn.
+    // Always mutate `fields` through set_field/remove_field/clear_all_fields so
+    // the index stays in sync.
+    std::vector<std::pair<std::string, Value>> fields;
+    std::unordered_map<std::string, size_t> field_index_;
+    std::vector<std::string> inherits;   // <inherit name="..."/> type names
+    // World::field_chain's cache: this element and the types it inherits,
+    // resolved and flattened into lookup order. Stale unless chain_gen_ matches
+    // World::inherit_gen, so anything that edits `inherits` at runtime must call
+    // World::note_inherit_change().
+    mutable std::vector<Element *> chain_;
+    mutable unsigned long long chain_gen_ = 0;
+
+    Element *parent = nullptr;
+    std::vector<Element *> children;
+
+    const Value *field(const std::string &n) const;
+    Value &set_field(const std::string &n, Value v);
+    // Erase an own field (v530+ null assignment: Fields.Set REMOVES the
+    // attribute, so HasAttribute goes false and inherited values re-resolve).
+    void remove_field(const std::string &n);
+    // Drop every own field (restore replaces the bag wholesale); keeps the name
+    // index consistent.
+    void clear_all_fields();
+    bool has_field(const std::string &n) const { return field(n) != nullptr; }
+};
+
+// The loaded world: every element plus the top-level metadata that lives outside
+// elements (templates, implied types, includes).
+struct World {
+    int asl_version = 0;
+    std::string version_string;
+    std::string game_name;
+
+    std::vector<std::unique_ptr<Element>> elements;  // owns all elements
+    std::vector<Element *> roots;                    // top-level (parent == null)
+    // Nothing iterates by_name in order (only point find/insert/erase), so an
+    // unordered_map's O(1) average lookup replaces std::map's O(log N) string
+    // comparisons on the hot find() path.
+    std::unordered_map<std::string, Element *> by_name;
+
+    // Lowercased delegate-name -> <delegate> element, built lazily by
+    // find_delegate(). Delegates are static so this never needs invalidating.
+    mutable std::unordered_map<std::string, Element *> delegate_ci_;
+    mutable bool delegate_ci_built_ = false;
+
+    // name -> body text. command flag kept for the (rare) templatetype="command".
+    std::vector<std::pair<std::string, std::string>> templates;
+    std::vector<std::pair<std::string, std::string>> dynamic_templates;
+    std::vector<std::pair<std::string, std::string>> verb_templates;
+
+    // "element~property" -> type, from <implied>.
+    std::map<std::string, std::string> implied_types;
+
+    std::vector<std::string> includes;   // <include ref="..."/> (unresolved in M1)
+    std::vector<std::string> errors;
+    // Non-fatal notices (e.g. a media command no-opped headless). Kept separate
+    // from `errors` so the boot/command-driving 0-error invariants stay strict.
+    std::vector<std::string> warnings;
+
+    // Set by the `finish` script command; the driver ends the session on it.
+    bool finished = false;
+
+    // Monotonic SortIndex source: creation order at load, bumped past
+    // everything by runtime parent changes (see Element::sort_index).
+    long next_sort_index = 0;
+
+    Element *find(const std::string &n) const;
+    // The <function> element of that name, or nullptr.
+    Element *find_function(const std::string &n) const;
+    // Case-insensitive lookup of a <delegate> element by name (lazily cached in
+    // delegate_ci_). `rundelegate` is invoked with the impl field/tag name, whose
+    // case may differ from the delegate declaration (e.g. "addscript" vs
+    // "AddScript"); the delegate's paramnames are needed to bind arguments.
+    Element *find_delegate(const std::string &n) const;
+    const std::string *implied_type(const std::string &elem_type,
+                                    const std::string &property) const;
+
+    // Runtime element creation/destruction (the `create`/`create timer`/
+    // `create turnscript`/`destroy` script commands). create_object appends a
+    // new root-level element (with an optional inherited type) and registers it
+    // by name; destroy unregisters an object/timer so find() no longer resolves
+    // it. Both mirror QuestViva's ObjectFactory.CreateObject / DestroyElement.
+    Element *create_object(const std::string &name, const std::string &type = "",
+                           const std::string &elem_type = "object");
+    void destroy_element(const std::string &name);
+
+    // by_name maintenance that also keeps Element::registered correct: binding a
+    // name to a new element marks any previously-bound element non-live (Quest's
+    // last-create-wins), and unbinding marks it non-live. Both count as
+    // containment changes (a shadowed/destroyed element drops out of scope).
+    void register_name(const std::string &name, Element *ep);
+    void unregister_name(const std::string &name);
+
+    // Runtime containment index: parent Element* (nullptr = roots) -> its live
+    // object-kind children in SortIndex order. Lazily rebuilt from scratch when
+    // containment_gen advances, so a missed bump can only cost freshness, never
+    // corrupt. note_containment_change() is called at every create/destroy/
+    // parent-reassignment/restore site. This turns GetDirectChildren /
+    // GetAllChildObjects from a full O(N) world scan (with a find() per element)
+    // into an O(children) lookup -- the profiler's top Quest 5 hotspot.
+    unsigned long long containment_gen = 0;
+    void note_containment_change() { ++containment_gen; }
+    const std::vector<Element *> &children_of(Element *parent);
+
+    // The order an attribute lookup tries elements in: `e`, then the types it
+    // inherits, most recently added first, depth-first. A type reached by two
+    // paths appears twice (a list extension counts once per path); only a
+    // back-edge -- an inheritance cycle -- is dropped. Cached per element until
+    // inherit_gen advances, which register_name/unregister_name do themselves
+    // (a type name resolving differently changes every chain through it).
+    unsigned long long inherit_gen = 1;
+    void note_inherit_change() { ++inherit_gen; }
+    const std::vector<Element *> &field_chain(Element *e) const;
+
+    // Cache backing children_of(); not for external use.
+    unsigned long long children_index_gen_ = ~0ull;
+    std::unordered_map<Element *, std::vector<Element *>> children_index_;
+};
+
+// Depth-first walk over `e` and then the types it inherits, most recently added
+// type first -- the order an attribute lookup tries them in. Every element is
+// visited once however many paths lead to it, which is also what stops an
+// inheritance cycle (a bad <inherit>, or a runtime type edit) from recursing
+// until the stack overflows. Ends early, returning true, as soon as `visit`
+// does. Not for the runtime attribute lookup (Interp::resolve_field): a list
+// extension has to see a type once per path that reaches it.
+template <class Visit>
+bool walk_inherited(const World &world, Element *e, Visit &visit,
+                    std::unordered_set<const Element *> &seen) {
+    if (!e || !seen.insert(e).second) return false;
+    if (visit(e)) return true;
+    for (auto it = e->inherits.rbegin(); it != e->inherits.rend(); ++it)
+        if (walk_inherited(world, world.find(*it), visit, seen)) return true;
+    return false;
+}
+template <class Visit>
+bool walk_inherited(const World &world, Element *e, Visit visit) {
+    std::unordered_set<const Element *> seen;
+    return walk_inherited(world, e, visit, seen);
+}
+
+// Load from a file path. Sniffs the content: a PK zip is treated as a .quest
+// package (game.aslx extracted from it); otherwise it is parsed as raw .aslx.
+// Returns false and fills world.errors on failure.
+//
+// core_dir points at the bundled Quest Core libraries (terps/question/quest5/aslx-core);
+// if empty, the ASLX_CORE environment variable is consulted. <include ref="..">
+// directives resolve against the game's own directory first, then core_dir,
+// then core_dir/Languages -- matching QuestViva's GetLibraryStream() order.
+bool load_file(const std::string &path, World &world,
+               const std::string &core_dir = "");
+
+// Load from an in-memory buffer already known to be .aslx XML (UTF-8, optional
+// BOM). core_dir/game_dir seed the <include> search path (see load_file).
+bool load_aslx_buffer(const char *data, size_t len, World &world,
+                      const std::string &core_dir = "",
+                      const std::string &game_dir = "");
+
+// Overlay a saved-game ASLX document (Quest's native .quest-save: an <asl
+// original="..."> doc re-declaring elements with their saved state) onto an
+// already-loaded World -- the freshly reloaded original game. Elements whose
+// name already exists are DISPLACED by the save's version (QuestViva's
+// Elements.Add override semantics); new names are created. `overlaid` receives
+// every element name the save (re)defined, so the caller can drop live
+// elements the save omitted. Returns false on an XML/version parse error.
+bool overlay_aslx_buffer(const char *data, size_t len, World &world,
+                         std::set<std::string> &overlaid,
+                         const std::string &core_dir = "");
+
+// Extract game.aslx from a .quest (zip) buffer into `out`. Returns false if the
+// buffer is not a zip or has no game.aslx.
+bool extract_game_aslx(const uint8_t *data, size_t len, std::string &out);
+
+// One entry of a .quest zip package, as listed by zip_list_entries. `offset`
+// is the payload's byte offset in the package (past the local header), so a
+// stored (method 0) entry's bytes can be used straight from the file.
+struct ZipEntryInfo {
+    std::string name;           // entry path as stored, e.g. "pics/troll.png"
+    uint16_t method = 0;        // 0 = stored, 8 = deflate
+    uint32_t comp_size = 0;     // payload size in the package
+    uint32_t raw_size = 0;      // decompressed size
+    size_t offset = 0;          // payload offset in the package buffer
+};
+
+// List a zip's central directory. Returns false if the buffer is not a zip.
+// Entries with unsupported compression methods are still listed (extraction
+// rejects them); directory entries (trailing '/') are skipped.
+bool zip_list_entries(const uint8_t *data, size_t len,
+                      std::vector<ZipEntryInfo> &out);
+
+// Extract one listed entry into `out`. Returns false on a corrupt package or
+// an unsupported compression method.
+bool zip_extract_entry(const uint8_t *data, size_t len, const ZipEntryInfo &e,
+                       std::string &out);
+
+// Find an entry by name: exact match first, then the first case-insensitive
+// match -- QuestViva keeps package resources in an OrdinalIgnoreCase
+// dictionary and resolves URLs the same way. Returns nullptr if absent.
+const ZipEntryInfo *zip_find_entry(const std::vector<ZipEntryInfo> &entries,
+                                   const std::string &name);
+
+// Inflate one raw-deflate (zip method 8) payload into `out`; `rawlen` is the
+// entry's declared decompressed size. Returns false on a corrupt stream. For
+// a host that reads an entry's payload from the package file by its offset
+// instead of holding the whole package in memory.
+bool inflate_raw(const uint8_t *src, size_t srclen, size_t rawlen,
+                 std::string &out);
+
+// Read a whole file into `out`; false if it cannot be opened.
+bool slurp_file(const std::string &path, std::string &out);
+
+#ifdef ASLX_EMBEDDED_CORE
+// A host that can't ship aslx-core as loose files compiles the libraries in
+// and supplies this (Gargoyle generates it with embed_core.cmake). `name` is
+// a bare filename, Core and Languages alike; false if there is no such file.
+bool embedded_core_file(const std::string &name, std::string &out);
+#endif
+
+// Human-readable dump of the element tree, for the loader debug mode / tests.
+std::string dump(const World &world);
+
+}  // namespace aslx
+
+#endif  // QUESTION_ASLX_HH

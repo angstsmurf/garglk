@@ -10,6 +10,7 @@ option(WITH_JACL "Enable the jacl interpreter" ON)
 option(WITH_LEVEL9 "Enable the level9 interpreter" ON)
 option(WITH_MAGNETIC "Enable the magnetic interpreter" ON)
 option(WITH_PLUS "Enable the plus interpreter" ON)
+option(WITH_QUESTION "Enable the question interpreter" ON)
 option(WITH_SCARIER "Enable the scarier interpreter" ON)
 option(WITH_SCOTT "Enable the scott interpreter" ON)
 option(WITH_TADS "Enable the tads interpreter" ON)
@@ -365,6 +366,85 @@ if(WITH_PLUS)
         INCLUDE_DIRS ${PLUS_INCLUDE_DIRS}
         LIBS c64diskimage
         GPL2)
+endif()
+
+# ------------------------------------------------------------------------------
+#
+# Question (from Spatterlight) for Quest 1-5 games
+#
+if(WITH_QUESTION)
+    find_package(ZLIB REQUIRED)
+
+    # Quest 5 games are XML. Use the system's Expat if there is one, and
+    # otherwise build the copy that's bundled here.
+    find_package(EXPAT)
+    if(EXPAT_FOUND)
+        set(QUESTION_EXPAT_INCLUDE_DIRS ${EXPAT_INCLUDE_DIRS})
+        set(QUESTION_EXPAT_LIBS ${EXPAT_LIBRARIES})
+    else()
+        add_library(question-expat STATIC question/expat/xcs.c
+            question/expat/xmlparse.c question/expat/xmlrole.c
+            question/expat/xmltok.c)
+        if(WIN32)
+            target_sources(question-expat PRIVATE question/expat/random_rand_s.c)
+        else()
+            target_sources(question-expat PRIVATE question/expat/random_dev_urandom.c)
+        endif()
+        if(GARGLK_BIG_ENDIAN)
+            target_compile_definitions(question-expat PRIVATE BYTEORDER=4321)
+        else()
+            target_compile_definitions(question-expat PRIVATE BYTEORDER=1234)
+        endif()
+        target_compile_definitions(question-expat PUBLIC XML_STATIC)
+        target_include_directories(question-expat PUBLIC question/expat)
+        set(QUESTION_EXPAT_INCLUDE_DIRS "")
+        set(QUESTION_EXPAT_LIBS question-expat)
+    endif()
+
+    # The Quest 5 Core libraries are compiled into the interpreter, so that
+    # there are no data files to install and find at runtime.
+    file(GLOB QUESTION_CORE_FILES CONFIGURE_DEPENDS
+        question/quest5/aslx-core/*.aslx
+        question/quest5/aslx-core/Languages/*.aslx)
+    add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/question-aslx-core.cc"
+        COMMAND "${CMAKE_COMMAND}"
+            "-DCORE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/question/quest5/aslx-core"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/question-aslx-core.cc"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/question/embed_core.cmake"
+        DEPENDS question/embed_core.cmake ${QUESTION_CORE_FILES}
+        COMMENT "Embedding the Quest 5 Core libraries"
+        VERBATIM)
+
+    terp(question
+        SRCS
+        question/istring.cc question/q3ext_builtin.cc question/questglk-common.cc
+        question/question-functions.cc question/question-objects.cc
+        question/question-panes.cc question/question-parse.cc
+        question/question-rooms.cc question/question-runner.cc
+        question/question-script.cc question/question-script-flow.cc
+        question/question-script-output.cc question/question-script-world.cc
+        question/question-session.cc question/question-state.cc
+        question/question-util.cc question/question-vars.cc
+        question/question-verbs.cc question/questionfile.cc
+        question/questionglk.cc question/questionglkterm.c question/readfile.cc
+        question/standardlib_builtin.cc question/stdverbs_builtin.cc
+        question/typelib_builtin.cc
+        question/quest5/aslx.cc question/quest5/aslx-runtime.cc
+        question/quest5/aslx-runtime-builtins.cc
+        question/quest5/aslx-runtime-parse.cc question/quest5/aslx-savenative.cc
+        question/quest5/aslx-state.cc question/quest5/aslxglk.cc
+        question/quest5/aslxglk-autosave.cc question/quest5/aslxglk-form.cc
+        question/quest5/aslxglk-input.cc question/quest5/aslxglk-map.cc
+        question/quest5/aslxglk-media.cc question/quest5/aslxglk-output.cc
+        question/quest5/aslxglk-panes.cc
+        "${CMAKE_CURRENT_BINARY_DIR}/question-aslx-core.cc"
+        common_utils/randomness.c
+        INCLUDE_DIRS question question/quest5 common_utils
+        ${ZLIB_INCLUDE_DIRS} ${QUESTION_EXPAT_INCLUDE_DIRS}
+        MACROS ASLX_EMBEDDED_CORE
+        LIBS ${ZLIB_LIBRARIES} ${QUESTION_EXPAT_LIBS}
+        CXXSTD 17)
 endif()
 
 # ------------------------------------------------------------------------------

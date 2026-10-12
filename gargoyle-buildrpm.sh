@@ -109,6 +109,7 @@ ${scare_spec}
 %{_libexecdir}/gargoyle/alan3
 %{_libexecdir}/gargoyle/hugo
 %{_libexecdir}/gargoyle/plus
+%{_libexecdir}/gargoyle/question
 %{_libexecdir}/gargoyle/scott
 %{_libexecdir}/gargoyle/taylor
 %{_libexecdir}/gargoyle/bocfel

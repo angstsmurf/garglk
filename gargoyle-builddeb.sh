@@ -115,7 +115,8 @@ Description: graphical player for Interactive Fiction games
  Gargoyle is based on the standard interpreters for the formats it
  supports: .taf (Adrift games, played with Scarier), .dat (AdvSys),
  *.agx/.d$$ (AGiliTy), .a3c (Alan3), .jacl/.j2 (JACL), .l9/.sna (Level
- 9), .mag (Magnetic), *.saga (Scott Adams Grand Adventures), .gam/.t3
+ 9), .mag (Magnetic), .asl/.cas/.aslx/.quest (Quest games, played with
+ Question), *.saga (Scott Adams Grand Adventures), .gam/.t3
  (TADS), *.z1/.z2/.z3/.z4/.z5/.z6/.z7/.z8/.zlb/.zblorb (Inform
  Z-Machine games, played with Bocfel), .ulx/.blb/.blorb/.glb/.gblorb
  (Inform or Superglús games compiled to the Glulxe VM in Blorb

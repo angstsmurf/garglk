@@ -25,6 +25,8 @@ Level 9 is copyright (c) Glen Summers, David Kinder, Alan Staniforth, Simon Bald
 
 Magnetic is copyright (c) Niclas Karlsson, David Kinder, Stefan Meier and Paul David Doherty. It is released under the terms of the GNU General Public License.
 
+Question is copyright (c) Mark J. Tilford, David Jones and Petter Sjolund. It is released under the terms of the GNU General Public License. It includes the Quest 5 Core libraries, which are copyright (c) Alex Warren and the Quest contributors, and the Expat XML parser, which is copyright (c) Thai Open Source Software Center Ltd, Clark Cooper and the Expat maintainers. Both are released under the terms of the MIT license.
+
 SCARE is copyright (c) Simon Baldwin. It is released under the terms of the GNU General Public License.
 
 SCARIER is copyright (c) Simon Baldwin, Mark J. Tilford and Petter Sjolund. It is released under the terms of the GNU General Public License.

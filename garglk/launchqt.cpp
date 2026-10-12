@@ -98,6 +98,7 @@ static QString winbrowsefile()
         Filter("JACL", {"jacl", "j2"}),
         Filter("Level 9", {"l9", "sna"}),
         Filter("Magnetic Scrolls", {"mag"}),
+        Filter("Quest", {"asl", "cas", "aslx", "quest"}),
         Filter("TADS", {"gam", "t3"}),
         Filter("Z-code", {"z1", "z2", "z3", "z4", "z5", "z6", "z7", "z8", "zlb", "zblorb"}),
     };

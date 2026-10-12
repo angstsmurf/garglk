@@ -68,6 +68,7 @@
 #define T_LEV9      "level9"
 #define T_MGSR      "magnetic"
 #define T_PLUS      "plus"
+#define T_QUEST     "question"
 #define T_SCOTT     "scott"
 #define T_TADS      "tadsr"
 #define T_TAYLOR    "taylor"
@@ -105,6 +106,7 @@ enum class Format {
     Level9,
     Magnetic,
     Plus,
+    Quest,
     Scott,
     TADS,
     Taylor,
@@ -153,6 +155,10 @@ static const std::unordered_map<std::string, Format> extensions = {
     {"sna", Format::Level9},
     {"mag", Format::Magnetic},
     {"plus", Format::Plus},
+    {"asl", Format::Quest},
+    {"aslx", Format::Quest},
+    {"cas", Format::Quest},
+    {"quest", Format::Quest},
     {"saga", Format::Scott},
     {"gam", Format::TADS},
     {"t3", Format::TADS},
@@ -182,6 +188,7 @@ static const std::unordered_map<Format, Interpreter> interpreters = {
     {Format::Level9, Interpreter(T_LEV9)},
     {Format::Magnetic, Interpreter(T_MGSR)},
     {Format::Plus, Interpreter(T_PLUS)},
+    {Format::Quest, Interpreter(T_QUEST)},
     {Format::Scott, Interpreter(T_SCOTT)},
     {Format::TADS, Interpreter(T_TADS)},
     {Format::Taylor, Interpreter(T_TAYLOR)},
