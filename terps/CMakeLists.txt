@@ -359,7 +359,6 @@ if(WITH_PLUS)
         common_utils/common_file_utils.c common_utils/common_utils.c
         common_utils/companion_search.c common_utils/layouttext.c
         common_utils/memory_allocation.c common_utils/randomness.c
-        common_utils/read_le16.c
         common_sagadraw/apple2draw.c common_sagadraw/c64a8draw.c
         common_sagadraw/gm_artifact.c common_sagadraw/pcdraw.c
         readwoz/ciderpress.c readwoz/woz2nib.c
@@ -483,7 +482,7 @@ if(WITH_SCOTT)
         scott/ti994a/unzip_in_mem.c common_utils/common_file_utils.c
         common_utils/common_utils.c common_utils/companion_search.c
         common_utils/layouttext.c common_utils/memory_allocation.c
-        common_utils/randomness.c common_utils/read_le16.c common_sagadraw/apple2draw.c
+        common_utils/randomness.c common_sagadraw/apple2draw.c
         common_sagadraw/c64a8draw.c common_sagadraw/gm_artifact.c
         common_sagadraw/gm_vector.c common_sagadraw/pcdraw.c aiukgraphics/aiukpalette.c
         aiukgraphics/irmak.c aiukgraphics/taylordraw.c common_zxscreen/zx_title.c
@@ -590,7 +589,7 @@ if(WITH_TAYLOR)
         taylor/utility.c common_utils/common_file_utils.c common_utils/common_utils.c
         common_utils/companion_search.c common_utils/layouttext.c
         common_utils/memory_allocation.c common_utils/randomness.c
-        common_utils/read_le16.c aiukgraphics/aiukpalette.c aiukgraphics/irmak.c
+        aiukgraphics/aiukpalette.c aiukgraphics/irmak.c
         aiukgraphics/taylordraw.c common_zxscreen/zx_title.c
         decompressz80/decompressz80.c
         INCLUDE_DIRS ${TAYLOR_INCLUDE_DIRS}
