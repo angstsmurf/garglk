@@ -479,6 +479,7 @@ if(WITH_SCOTT)
         scott/saga/c64a8scott.c scott/saga/saga.c scott/saga/sagagraphics.c
         scott/saga/vector_common.c scott/ti994a/load_ti99_4a.c
         scott/ti994a/rtpi_graphics.c scott/ti994a/ti99_4a_terp.c
+        scott/ti994a/ti99_disk.c
         scott/ti994a/unzip_in_mem.c common_utils/common_file_utils.c
         common_utils/common_utils.c common_utils/companion_search.c
         common_utils/layouttext.c common_utils/memory_allocation.c
