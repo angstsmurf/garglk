@@ -34,11 +34,10 @@
 
 #include "parser.h"
 
-/* Base address of the ZX Spectrum's writable RAM. ROM occupies
-   0x0000-0x3FFF; RAM starts at 0x4000, which is where loaded programs
-   live. Used to translate Z80 addresses stored in saved .z80 snapshots
-   to offsets into our in-memory file buffer. */
-#define ZX_RAM_BASE 0x4000
+/* ZX_RAM_BASE (0x4000, from decompressz80.h) is where the RAM of the ZX
+   Spectrum begins and where loaded programs live. Used to translate Z80
+   addresses stored in saved .z80 snapshots to offsets into our in-memory
+   file buffer. */
 
 /* Number of 16-bit words in a game file header */
 #define HEADER_WORDS 15
@@ -1144,7 +1143,7 @@ static uint8_t *DecompressParsec(uint8_t *start, uint8_t *end, uint8_t *dataptr)
    by every game on a tape, so they live in AlkatrazTape. */
 typedef struct {
     const char *title;
-    int tzx_block;     /* GetTZXBlock index of this game's encrypted block */
+    int tzx_block;     /* number of the data block the game is encrypted in */
     uint8_t loacon;    /* initial rolling key */
     uint8_t add1;      /* key-evolution constants */
     uint8_t add2;
@@ -1168,10 +1167,10 @@ typedef struct {
    the address each game's GameInfo expects (Pirate 0x869A, Voodoo 0x8752,
    Strange Odyssey 0x899A, Buckaroo 0x8C54). */
 static const AlkatrazGame scoops_games[] = {
-    { "Pirate Adventure",  4, 0xad, 0xfd, 0xff },
-    { "Voodoo Castle",     8, 0x1e, 0xfe, 0xbe },
-    { "Strange Odyssey",  12, 0x5a, 0x9c, 0xdc },
-    { "Buckaroo Banzai",  16, 0xdb, 0xb3, 0x21 },
+    { "Pirate Adventure",  3, 0xad, 0xfd, 0xff },
+    { "Voodoo Castle",     7, 0x1e, 0xfe, 0xbe },
+    { "Strange Odyssey",  11, 0x5a, 0x9c, 0xdc },
+    { "Buckaroo Banzai",  15, 0xdb, 0xb3, 0x21 },
 };
 
 static const AlkatrazTape alkatraz_tapes[] = {
@@ -1216,22 +1215,24 @@ static int DeAlkatrazTape(void)
     }
     const AlkatrazGame *game = &tape->games[choice];
 
-    size_t blocklen = file_length;
-    uint8_t *block = GetTZXBlock(game->tzx_block, entire_file, &blocklen);
+    size_t blocklen = 0;
+    uint8_t *block = GetTZXBlock(game->tzx_block, entire_file, file_length, &blocklen);
     if (block == NULL)
         return 0;
-    if (tape->source_offset + tape->size > blocklen) {
-        free(block);
+
+    uint8_t loacon = game->loacon;
+    const AlkatrazKey schedule = { game->add1, game->add2, 0, 0 };
+    uint8_t *mem = ZXNewMemory();
+    int ok = mem != NULL && DeAlkatraz(block, blocklen, tape->source_offset,
+        mem, tape->target, tape->size, &loacon, &schedule);
+    free(block);
+    if (!ok) {
+        free(mem);
         return 0;
     }
 
-    uint8_t loacon = game->loacon;
-    uint8_t *mem = DeAlkatraz(block, NULL, tape->source_offset, tape->target,
-        tape->size, &loacon, game->add1, game->add2, 0);
-    free(block);
-
-    uint8_t *image = MemAlloc(0xc000);
-    memcpy(image, mem + ZX_RAM_BASE, 0xc000);
+    uint8_t *image = MemAlloc(ZX_MEMORY_SIZE - ZX_RAM_BASE);
+    memcpy(image, mem + ZX_RAM_BASE, ZX_MEMORY_SIZE - ZX_RAM_BASE);
     free(mem);
 
     free(entire_file);

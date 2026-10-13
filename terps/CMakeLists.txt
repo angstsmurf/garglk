@@ -486,7 +486,8 @@ if(WITH_SCOTT)
         common_sagadraw/c64a8draw.c common_sagadraw/gm_artifact.c
         common_sagadraw/gm_vector.c common_sagadraw/pcdraw.c aiukgraphics/aiukpalette.c
         aiukgraphics/irmak.c aiukgraphics/taylordraw.c common_zxscreen/zx_title.c
-        decompressz80/decompressz80.c readwoz/ciderpress.c readwoz/woz2nib.c
+        decompressz80/alkatraz.c decompressz80/tapetzx.c decompressz80/z80snap.c
+        decompressz80/zxscreen.c readwoz/ciderpress.c readwoz/woz2nib.c
         INCLUDE_DIRS ${SCOTT_INCLUDE_DIRS}
         LIBS c64diskimage unp64 ${ZLIB_LIBRARIES})
 endif()
@@ -591,7 +592,8 @@ if(WITH_TAYLOR)
         common_utils/memory_allocation.c common_utils/randomness.c
         aiukgraphics/aiukpalette.c aiukgraphics/irmak.c
         aiukgraphics/taylordraw.c common_zxscreen/zx_title.c
-        decompressz80/decompressz80.c
+        decompressz80/alkatraz.c decompressz80/tapetzx.c decompressz80/z80snap.c
+        decompressz80/zxscreen.c
         INCLUDE_DIRS ${TAYLOR_INCLUDE_DIRS}
         LIBS c64diskimage unp64
         GPL2)
