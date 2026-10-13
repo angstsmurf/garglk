@@ -31,10 +31,12 @@ static uint32 surfaceColorAt(DrawSurface *ds, int x, int y) {
 }
 
 bool Comprehend::applyPreferredGraphicsMode() {
-#ifdef SPATTERLIGHT
 	// Re-applied on every arrange (see onArrange), so guard against doing work
 	// when the preference hasn't actually changed: a window resize lands here
 	// too. -1 is the initial "never applied" sentinel, so the first call runs.
+	// Outside Spatterlight the preference is set once, by the -c option, so
+	// only that first call does anything and the #dhgr / #pcjr commands (see
+	// game.cpp) have the last word.
 	if (gli_comprehend_graphics == _appliedComprehendGraphics)
 		return false;
 	_appliedComprehendGraphics = gli_comprehend_graphics;
@@ -48,11 +50,6 @@ bool Comprehend::applyPreferredGraphicsMode() {
 		return false;
 	setMoreColours(more);
 	return true;
-#else
-	// No host graphics-quality preference on other Glk back-ends; the mode is
-	// controlled by the #dhgr / #pcjr commands (see game.cpp). Nothing to do.
-	return false;
-#endif
 }
 
 void Comprehend::repaintCurrentScene() {
@@ -414,18 +411,14 @@ void Comprehend::showGraphics() {
 		(glui32)(G_RENDER_HEIGHT * _pixelSize),
 		wintype_Graphics, GLK_GRAPHICS_ROCK);
 	_graphicsEnabled = hasPictureTarget();
-	// Graphics windows default to a white background (glkimp window.c), which
-	// shows through in the centring margins and as thin slivers where the scaled
-	// fill-rects don't perfectly tile. Match it to the buffer's Normal-style
-	// background instead, so the picture window blends with the rest of the
-	// screen (as the Level9 and Magnetic interpreters do). Glk offers no direct
-	// way to read a window's background, so probe the style hint and fall back to
-	// white if the front-end can't report it.
+	// Graphics windows default to a white background (glkimp window.c), and
+	// matching the theme's text background is no better: it shows in the
+	// centring margins and wherever a picture leaves the screen untouched (The
+	// Coveted Mirror's rooms get stray light lines around them). The original
+	// machines showed these pictures on a black screen, so the window is always
+	// black, whatever the theme.
 	if (_topWindow) {
-		glui32 background;
-		if (!glk_style_measure(_bottomWindow, style_Normal,
-							   stylehint_BackColor, &background))
-			background = 0x00ffffff;
+		const glui32 background = 0x00000000;
 		glk_window_set_background_color(_topWindow, background);
 		glk_window_clear(_topWindow);
 	}
