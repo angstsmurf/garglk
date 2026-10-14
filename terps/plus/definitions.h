@@ -140,8 +140,9 @@ typedef struct {
 
 typedef struct {
     char *Text;
-    uint8_t Location;
-    uint8_t InitialLoc;
+    /* 16 bits: X-Men sends used-up items to "room 500". */
+    uint16_t Location;
+    uint16_t InitialLoc;
     uint16_t Flag;
     uint8_t Dictword;
 } Item;

@@ -354,7 +354,7 @@ if(WITH_PLUS)
         SRCS
         plus/animations.c plus/apple2detect.c plus/atari8detect.c plus/c64detect.c
         plus/companionfile.c plus/dumpactions.c plus/extracommands.c plus/gameinfo.c
-        plus/graphics.c plus/loaddatabase.c plus/parseinput.c plus/plusmain.c
+        plus/graphics.c plus/loaddatabase.c plus/opcodes.c plus/parseinput.c plus/plusmain.c
         plus/restorestate.c plus/sagadraw_glue.c plus/stdetect.c plus/stdraw.c
         common_utils/common_file_utils.c common_utils/common_utils.c
         common_utils/companion_search.c common_utils/layouttext.c
