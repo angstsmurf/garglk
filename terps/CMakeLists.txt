@@ -586,9 +586,9 @@ if(WITH_TAYLOR)
         taylor/actions.c taylor/alkatraz_screen.c taylor/animations.c
         taylor/c64decrunch.c taylor/decrypttotloader.c taylor/extracommands.c
         taylor/extracttape.c taylor/gameinfo.c taylor/gameload.c taylor/graphics.c
-        taylor/loading_screen.c taylor/loadtotpicture.c taylor/parseinput.c
+        taylor/loading_screen.c taylor/parseinput.c
         taylor/player.c taylor/restorestate.c taylor/textoutput.c taylor/ui.c
-        taylor/utility.c common_utils/common_file_utils.c common_utils/common_utils.c
+        common_utils/common_file_utils.c common_utils/common_utils.c
         common_utils/companion_search.c common_utils/layouttext.c
         common_utils/memory_allocation.c common_utils/randomness.c
         aiukgraphics/aiukpalette.c aiukgraphics/irmak.c
