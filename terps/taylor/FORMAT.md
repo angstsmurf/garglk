@@ -1,8 +1,8 @@
 # TaylorMade Game Data Unofficial Specification
 
-This document describes the game data of the later Adventure International UK / Adventure Soft UK adventures, the ones run by the TaylorMade interpreter in this directory: *Questprobe featuring The Human Torch and The Thing*, *Rebel Planet*, *Blizzard Pass*, *Masters of the Universe: The Super Adventure* (He-Man), *Temple of Terror* and *Kayleth*. There is no official specification; the format is defined by the original Z80 and 6502 engines.
+This document describes the game data of the later Adventure International UK / Adventure Soft UK adventures, the ones run by the TaylorMade interpreter in this directory: *Questprobe featuring The Human Torch and The Thing*, *Rebel Planet*, *Blizzard Pass*, *Masters of the Universe: The Super Adventure* (a.k.a. *Terraquake*), *Temple of Terror* and *Kayleth*. There is no official specification; the format is defined by the original Z80 and 6502 engines.
 
-The design is superficially similar to that of the earlier Adventure International UK (Scott Adams engine) games. The token-based text compressor and the tile pictures are reused. What is new is that a room picture is no longer a single picture: a picture script, first seen in *Seas of Blood*, combines several of the old-style pictures, copies them and transforms them.
+The design is superficially similar to that of the earlier Adventure International UK (Scott Adams engine) games. The tile-based graphics, font, and split-screen layout look familiar. They hide a number of inventions that squeeze more into the 48 kilobyte memory of the ZX Spectrum: an efficient token-based text compressor and room pictures drawn with a picture script, an expansion of the system first seen in *Seas of Blood*, combining and mirroring several smaller images.
 
 This document started as Alan Cox's working notes. It has been brought in line with what this interpreter does; where the two disagreed, the interpreter (which is tested against the original games) wins. Statements the interpreter does not depend on are marked **(unverified)**. Memory addresses were checked in 48K and 128K snapshots of the Spectrum releases.
 
@@ -55,6 +55,12 @@ The document describes the games and their original engines. Where it describes 
   - [12.2 Text](#122-text)
   - [12.3 Engine tables](#123-engine-tables)
   - [12.4 Pictures](#124-pictures)
+- [13. Saved games](#13-saved-games)
+  - [13.1 What is saved](#131-what-is-saved)
+  - [13.2 Save file](#132-save-file)
+  - [13.3 Undo and memory saves](#133-undo-and-memory-saves)
+  - [13.4 Original Spectrum releases](#134-original-spectrum-releases)
+  - [13.5 Original Commodore 64 releases](#135-original-commodore-64-releases)
 - [Appendix A. The BBC Micro source](#appendix-a-the-bbc-micro-source)
 - [Appendix B. Comparison with the Quill](#appendix-b-comparison-with-the-quill)
   - [B.1 Blizzard Pass in both systems](#b1-blizzard-pass-in-both-systems)
@@ -72,9 +78,9 @@ This interpreter tells four variants of the original engine apart (`GameVersion`
 | Questprobe 3 | *Questprobe featuring The Human Torch and The Thing* | The oldest. Its own opcode numbering and text encoding, and the picture format of the earlier Adventure International UK games, drawn by a `PICTURE` action. See [§12](#12-questprobe-3). |
 | Rebel Planet | *Rebel Planet* | String end markers live inside the token table ([§4.3](#43-rebel-planet-strings)). |
 | Blizzard Pass | *Blizzard Pass* | Spectrum 128 only. Action 12 is `GOBY`. |
-| He-Man | *He-Man*, *Temple of Terror*, *Kayleth* | Second message table, block pictures compressed with a pattern table (Spectrum only), the newer picture-script operands, actions 31–35. |
+| Terraquake | *Terraquake*, *Temple of Terror*, *Kayleth* | Second message table, block pictures compressed with a pattern table (Spectrum only), the newer picture-script operands, actions 31–35. |
 
-Everything outside [§12](#12-questprobe-3) describes the three later variants unless it says otherwise. Where the Rebel Planet and Blizzard Pass variants differ together from the He-Man variant, they are called the **older** variants.
+Everything outside [§12](#12-questprobe-3) describes the three later variants unless it says otherwise. Where the Rebel Planet and Blizzard Pass variants differ together from the Terraquake variant, they are called the **older** variants.
 
 ### 1.2 Game files
 
@@ -273,7 +279,7 @@ The texts are those of a typical game; each game words them its own way.
 
 ### 5.2 Second message table
 
-The He-Man variant has a second message table, in the same format, printed by action 12 (`MESSAGE2`).
+The Terraquake variant has a second message table, in the same format, printed by action 12 (`MESSAGE2`).
 
 ---
 
@@ -314,7 +320,7 @@ The list ends with the entry `XXXX FF`. Several words may share a value (synonym
 | 1–10 | The directions, in the order of system messages 1–10 |
 | `7E` | Reserved: "any word" in the engine tables |
 
-Alan Cox's notes say bit 7 of the value is set for nouns and clear for verbs. That holds in *Blizzard Pass* and *He-Man* only: all their verbs are below 128 and all their nouns 128 or above. The other games number their nouns on from the verbs, and some nouns stay below 128 (from 50 in *Questprobe 3*, which has no values of 128 or above at all; from 85 in *Rebel Planet*, 67 in *Kayleth* and 120 in *Temple of Terror*). The original parser does not look at bit 7 but compares the value with a per-game threshold; see [§8.1](#81-assigning-words-to-slots).
+Alan Cox's notes say bit 7 of the value is set for nouns and clear for verbs. That holds in *Blizzard Pass* and *Terraquake* only: all their verbs are below 128 and all their nouns 128 or above. The other games number their nouns on from the verbs, and some nouns stay below 128 (from 50 in *Questprobe 3*, which has no values of 128 or above at all; from 85 in *Rebel Planet*, 67 in *Kayleth* and 120 in *Temple of Terror*). The original parser does not look at bit 7 but compares the value with a per-game threshold; see [§8.1](#81-assigning-words-to-slots).
 
 ### 8.1 Assigning words to slots
 
@@ -325,12 +331,12 @@ The original parser reads the words of a command it recognises into the slots *v
 | Questprobe 3 | 50 | 16 and 44 |
 | Rebel Planet | 85 | 16 and 44 |
 | Blizzard Pass | 85 | — |
-| He-Man | 66 | — |
+| Terraquake | 66 | — |
 | Temple of Terror, Kayleth | 63 | — |
 
 The words that keep their position stay in the slot of the order they were typed in, as the first or second word.
 
-The verb is kept for a command after a comma (`GET LAMP, SWORD`). In Questprobe 3 a command with no verb is answered "I don't know how to do that" without looking at the tables; the later games give up only when no word is recognised at all.
+The verb is kept for a command after a comma (`GET LAMP, SWORD`). In *Questprobe 3* a command with no verb is answered "I don't know how to do that" without looking at the tables; the later games give up only when no word is recognised at all.
 
 In *Blizzard Pass*, the original engine changes a noun typed before any verb to a verb: SKIN (249 → 43), POLISH (175 → 44) and DRAW(BRIDGE) (134 → 49). See [§B.1](#b1-blizzard-pass-in-both-systems) for why.
 
@@ -451,7 +457,7 @@ The table is scanned from the start. For the event table, an entry is tried only
 | 10 | `DROP` | O | Drop O |
 | 11 | `GOTO` | L | Move the player to L |
 | 12 | `GOBY` | O | *Blizzard Pass*: move the player to the room of O |
-| 12 | `MESSAGE2` | M | He-Man variant: print message M of the second message table |
+| 12 | `MESSAGE2` | M | Terraquak variant: print message M of the second message table |
 | 13 | `SET` | F | Set flag F to 255 |
 | 14 | `CLEAR` | F | Set flag F to 0 |
 | 15 | `MESSPRINT` | M | Print message M |
@@ -470,9 +476,9 @@ The table is scanned from the start. For the event table, an entry is tried only
 | 28 | `MEANS` | V N | Replace the verb and noun of the input |
 | 29 | `PUTWITH` | O O | Put the first object where the second is |
 | 30 | `BEEP` | D P | (*Rebel Planet*) Beep with duration D and pitch P |
-| 31 | `REFRESH` | 0 0 | Redraw the room. *He-Man* and *Kayleth*: first "get all", for objects from 45 (*He-Man*) or 78 (*Kayleth*) up |
-| 32 | `QSAVE` | 0 0 | (*He-Man*, *Temple of Terror*, *Kayleth*) Save to memory |
-| 33 | `QLOAD` | 0 0 | (*He-Man*, *Temple of Terror*, *Kayleth*) Restore from memory |
+| 31 | `REFRESH` | 0 0 | Redraw the room. *Terraquake* and *Kayleth*: first "get all", for objects from 45 (*Terraquake*) or 78 (*Kayleth*) up |
+| 32 | `QSAVE` | 0 0 | (*Terraquake*, *Temple of Terror*, *Kayleth*) Save to memory |
+| 33 | `QLOAD` | 0 0 | (*Terraquake*, *Temple of Terror*, *Kayleth*) Restore from memory |
 | 34 | Clear lower | 0 0 | (*Kayleth*) Clear the lower window |
 | 35 | `OOPS` | 0 0 | (*Temple of Terror*) Undo the last move |
 
@@ -515,7 +521,7 @@ In some releases the tile stream has an extra layer of compression, of one of tw
 | `F3` *n* | `82` *n* `00` |
 | `FA` *len* *copies* | The next *len* − 1 bytes, decompressed in turn, repeated *copies* times |
 
-**He-Man variant (Spectrum only).** The C64 releases of *He-Man*, *Temple of Terror* and *Kayleth* store the tile stream uncompressed. In the Spectrum releases, the game has a pattern table of *k* marker bytes, followed by *k* two-byte addresses, followed by the patterns. A byte equal to marker *i* is replaced with the pattern at address *i*, up to a per-game end marker byte. The table address, *k* and the end marker are in the registry.
+**Terraquake variant (Spectrum only).** The C64 releases of *Terraquake*, *Temple of Terror* and *Kayleth* store the tile stream uncompressed. In the Spectrum releases, the game has a pattern table of *k* marker bytes, followed by *k* two-byte addresses, followed by the patterns. A byte equal to marker *i* is replaced with the pattern at address *i*, up to a per-game end marker byte. The table address, *k* and the end marker are in the registry.
 
 ### 11.4 Picture scripts
 
@@ -523,7 +529,7 @@ The picture script table is a sequence of scripts, each ending in `FF`. Script *
 
 A script is a sequence of instructions. A byte that is not one of the codes below is the number of a block picture, and is followed by the cell position *x*, *y* at which to draw it.
 
-The second column gives the address of each routine in the Spectrum release of *He-Man*, where the dispatcher is at `6F09` and a script is run by calling `6EF9`. Drawing a block picture is `6F84`, which calls `7234` to find the block.
+The second column gives the address of each routine in the Spectrum release of *Terraquake*, where the dispatcher is at `6F09` and a script is run by calling `6EF9`. Drawing a block picture is `6F84`, which calls `7234` to find the block.
 
 | Code | Address | Operands | Effect |
 |------|---------|----------|--------|
@@ -737,6 +743,90 @@ There are 246 tiles. Two pictures also use tile 255, for which the original draw
 
 ---
 
+## 13. Saved games
+
+### 13.1 What is saved
+
+The whole mutable state of a game is the 128 flags ([§3.1](#31-flags)) and the 256 object location slots ([§3.2](#32-object-locations)). Everything else is read from the game image and does not change:
+
+- the room, object and message text, the dictionary and the engine tables,
+- the room exits ([§9](#9-exits)), which no action modifies,
+- the initial state ([§3.3](#33-initial-state)).
+
+The player's room is flag 0, the carried and worn location codes are flags 2 and 3, and the carried count is flag 5, so those are saved with the flags. The picture on screen, the pending input, the wait counter's display and the number of objects (flag 6, fixed per game) need no separate record. Nothing in a saved game identifies the game or the release; one game's file loads into another and is read as that game's state.
+
+This interpreter keeps the numbers of flags and object slots fixed at 128 and 256 whatever the game's own counts, so a game with fewer objects saves the unused slots too. The original engines save only 67 flag slots (69 in *Questprobe 3*) followed by as many object slots as the game has.
+
+**The original engines** keep fewer flags and objects and save them in their own ways, described in [§13.4](#134-original-spectrum-releases) and [§13.5](#135-original-commodore-64-releases). This interpreter cannot read their saved games, and they cannot read its files.
+
+### 13.2 Save file
+
+`SAVE` ([§10.5](#105-actions), action 5, or the typed commands `SAVE` and `#SAVE`) asks the player for a file through the Glk file dialog and writes 384 bytes, with no header:
+
+| Offset | Size | Content |
+|--------|------|---------|
+| 0 | 128 | Flags 0–127, one byte each |
+| 128 | 256 | Object locations 0–255, one byte each |
+
+If the file cannot be opened, it prints `Save failed.`; otherwise `Saved.`. The game goes on.
+
+`RESTORE` (action 1, or `#RESTORE`) asks for a file, and prints `Unable to open file.` if it does not exist. The file is read straight into the live arrays and must be exactly 384 bytes long. If it is shorter or longer, it prints `BAD DATA! Invalid save file.` and puts back the state that was current before the attempt. On success the lower window is cleared and the room is described again; the picture is redrawn by that description. A restore leaves the Kayleth preview mode, if the game is in it.
+
+Nothing else in the file is checked: any 384 bytes restore, including a room number that has no description.
+
+### 13.3 Undo and memory saves
+
+Undo, the memory save slot (`QSAVE`/`QLOAD`, actions 32 and 33 of the Terraquake variant, and `#QUICKSAVE`/`#QUICKLOAD` for every game) and restarting use the same 384 bytes of state, kept in memory as a record of flags and object locations ([§13.1](#131-what-is-saved)).
+
+- **Undo.** One state is pushed before each command that the player types, up to 100; the oldest is dropped beyond that. No state is pushed on the turn after a restore (stop-time is set), nor during the *Kayleth* preview. Undoing pops one and restores the one before it; there is nothing to undo on the first turn. The *Temple of Terror* `OOPS` action (35) does the same without the `Move undone.` message, and *Terraquake* uses it after sending the player to the "By the power of Grayskull" room (action `GOTO 83` pushes a state first).
+- **Memory save.** One slot. Saving again replaces it (`Previous state deleted.`). Restoring the slot pushes an undo state afterwards, so it can be undone.
+- **Restart.** The initial state is recorded when the game starts, and is restored by `#RESTART`.
+
+Every restore, from file or memory, sets the stop-time flag so that the rest of the current turn's table scan does not run on the restored state.
+
+### 13.4 Original Spectrum releases
+
+All the Spectrum games save to tape through the 48K ROM routines `SA-BYTES` ($04C2) and `LD-BYTES` ($0556), and keep the state in one contiguous RAM block: flag slots first (flag 0, the player's room, is the first byte), then the object locations. Only 67 flag slots exist in the games below, except *Questprobe 3*, which has 69 (four character slots and 65 game flags).
+
+| Game | Block start | Length | Flags | Objects | Format |
+|------|-------------|--------|-------|---------|--------|
+| *Rebel Planet* | $5D87 | 323 | 67 | 256 | CODE file |
+| *Questprobe 3* | $5B70 | 118 | 69 | 49 | CODE file |
+| *Blizzard Pass* (128K) | $5D87 | 321 | 67 | 254 | raw block |
+| *Terraquake* | $5D5C | 159 | 67 | 92 | raw block |
+| *Kayleth* | $5D5C | 191 | 67 | 124 | raw block |
+| *Temple of Terror* | $5D5C | 259 | 67 | 192 | raw block |
+
+The object count is the initial value of flag 6 plus one for *Terraquake*, *Kayleth* and *Blizzard Pass*. *Kayleth*'s own table has 124 slots although this interpreter forces 120 objects.
+
+**CODE file** (*Rebel Planet*, *Questprobe 3*). The game calls the ROM's `SAVE "SAVED GAME" CODE` entry (`$0970`) with the block address in HL and a 17-byte header prepared in RAM, so the ROM prints `Start tape, then press any key.` and writes a standard header (type 3, name `SAVED GAME`, the length above) followed by a data block with flag byte $FF. A save is therefore an ordinary tape file that a BASIC `LOAD "" CODE` can read. Restoring prints the game's message 26 (*do you want to restore a saved game ?*) and takes `Y` or `N` (`N` returns to the game). It then calls the ROM's header search (`LD-LOOK-H`, $0761) with the expected header, which skips tape files of a different type or name, rejects a file longer than expected, and loads the data to a buffer at $4014 in the screen memory; after a key press the game copies the block to the state arrays and carries on.
+
+**Raw block** (*Terraquake*, *Kayleth*, *Temple of Terror*, *Blizzard Pass*). The game prints message 20 (*press any key to continue*) and calls `SA-BYTES` directly with IX = block start, DE = length and A = $2A, so the tape holds just a data block with flag byte $2A and the ROM's XOR parity byte, with no header and no name. Restoring asks message 26 (`Y`/`N`) and calls `LD-BYTES` with the same flag byte and length. A block of another length or flag, or a tape error, makes the ROM return with carry clear, and the game then restarts from the beginning, as it does after `play again? Y`.
+
+Neither variant checks the contents.
+
+### 13.5 Original Commodore 64 releases
+
+The C64 games call the KERNAL `SAVE` ($FFD8) and `LOAD` ($FFD5) directly. The block always starts with the flag slots at $0400, with the object locations from $0443 (67 flag slots), and ends before $0543, so it is 323 bytes in *Rebel Planet*, *Kayleth* and *Terraquake* (*Temple of Terror* is the same). *Questprobe 3* keeps its state at $CA00 and saves 119 bytes, up to but not including $CA77. That is one byte more than the Spectrum version's 118; the extra byte follows the 49 object slots.
+
+| Game | File name | Device | Secondary address | Prompt on save | Prompt on load |
+|------|-----------|--------|-------------------|----------------|----------------|
+| *Rebel Planet* | `RPSAVED` | 1 (tape) | 0 | `Press PLAY and RECORD on tape` | `Press PLAY on tape` |
+| *Questprobe 3* | `SAVED GAME.` | 1 (tape) | $FF | `PRESS PLAY AND RECORD ON TAPE.` | `PRESS PLAY ON TAPE.` |
+| *Kayleth* | `KLSAVED` | 8 (disk) | 1 | `PRESS PLAY AND RECORD ON TAPE` | `PRESS PLAY ON TAPE` |
+| *Terraquake* (tape) | `MASTERS` | 1 (tape) | 1 | `PRESS PLAY AND RECORD ON TAPE` | `PRESS PLAY ON TAPE` |
+| *Temple of Terror* (disk) | `MASTERS` | 8 (disk) | 1 | none | none |
+
+The file name is passed to `SETNAM` by a small routine that sits next to `SETLFS`, with the name bytes right after it. *Kayleth* passes length 9 for the 8-byte string `KLSAVED` + carriage return, so one byte of code follows it into the name. In the *Terraquake* and *Temple of Terror* images that were examined the string is present but no `SETNAM` call is, so those saves are made with whatever name the KERNAL last had (none).
+
+**Saving** prints the prompt, waits for a key, calls `SAVE` with the range above, and sets flag $56 to redraw the screen. There is no error check; a failed save is not noticed. **Restoring** asks message 26 (`Y`/`N`, `N` returns), prints the prompt, calls `LOAD` with X/Y = $0400 (or $CA00) and secondary address 0 where the file's own address is not used. It fails with `LOAD ERROR TRY AGAIN` if the KERNAL reports an error or if the end address's low byte differs from the expected one ($43, or $77 in *Questprobe 3*), and asks again. On success the screen is redrawn.
+
+The files are therefore plain KERNAL program files with a two-byte load address ($0400 or $CA00) followed by the block. The Spectrum and C64 states have the same layout in *Rebel Planet* (67 flags, 256 object slots) but the files are different containers and the tape formats do not interchange.
+
+*Questprobe 3* on the BBC Micro and the Amiga and other releases were not examined.
+
+---
+
 ## Appendix A. The BBC Micro source
 
 The 6502 source of the BBC Micro Questprobe 3 survives. Its opcode names, which partly overlap with those of the Quill, are the source of the names used by this interpreter and this document.
@@ -793,3 +883,29 @@ The C64 *Blizzard Pass* is a Quill game, so the same game exists in both systems
 | Fix-up | None needed. | Engine code changes SKIN, POLISH and DRAW to verbs when no verb comes before them ([§8.1](#81-assigning-words-to-slots)). |
 
 Those workarounds suggest that the game was written with the Quill and then ported to this engine, as *Hampstead* was. The C64 title text says it was "transferred from Spectrum 128 with a few slight alterations", which fits the author's own Quill version having been written on a Spectrum 128.
+
+#### Status and event tables
+
+The two versions' tables were compared by mapping rooms (90 of 111 matched, from identical description text and then exit propagation, with no inconsistencies), messages (by text similarity) and words (by name). The room and message numbers below are therefore approximate. The Quill calls the tables "process" and "response". They correspond to the status and event tables here.
+
+| | C64 (Quill) | Spectrum (TaylorMade) |
+|---|---|---|
+| Event / response entries | 342 | 431 |
+| Status / process entries | 39 | 94 |
+| Words (entries / distinct values) | 180 / 131 | 218 / 146 |
+| Messages used | 115 | 172 or more |
+| Verb and noun numbers | Verbs 1–48, nouns from 79. | Verbs below 85, nouns from 128. |
+| Room, object, flag, message numbers | Unrelated to the Spectrum's. | Unrelated to the C64's. |
+| Entry order | Event table grouped by verb (movement verbs first, many conditional). | Starts with puzzle entries (DOWN CREV, HURL WIND…). |
+| Conditions | AT (191), PRESENT (150), CARRIED (137). | PRESENT (187), AT (103), HERE (99), W3 (33), NOTCREATED (29), CARRIED (26). |
+| Actions | MESSAGE 163, DESC 121, SCORE 37, TURNS 36, PAUSE 23. No MEANS. | MESSPRINT 207, MEANS 58, SWAP 58, PLACE 25. No score or turn counter. |
+
+* **Words.** Only the directions map one to one (1–4 are the same; C64 5–8 are Spectrum 7–10; C64 up and down 9 and 10 are Spectrum 5 and 6). Other values map to several values, in no monotone order. 24 C64 words are absent from the Spectrum dictionary and 44 Spectrum words (AND, AT, IT, ON, OFF…) from the C64's.
+* **Order.** The longest common subsequence of the verb/noun sequences of the two event tables is 21 entries. With the conditions included, it is 4, and for the status tables 2.
+* **Messages.** Of the 115 C64 messages, 20 are identical to a Spectrum message and 41 are at least 85% similar. Some have no Spectrum counterpart.
+* **Entry by entry.** Of 43 C64 event entries with a confidently matched message, 24 have a Spectrum entry with the same verb and noun class that prints the matched message. Even those differ in their conditions and actions. The Spectrum tests whether an object is present or created where the C64 tests AT a room plus CARRIED. The C64 adds SCORE and TURNS before END. The C64 uses PAUSE then DESC where the Spectrum uses GOTO with the stop bit. The Spectrum uses MEANS and SWAP of objects.
+* **Verbs.** Some puzzles use different verbs (THRO and HURL, LOOK and READ, SMAS and FORC, CROS HOLE and CROS CREV).
+* **Take and drop.** The C64 has 65 TAKE and 54 DROP entries, the Spectrum 83 and 58. The per-noun counts agree for only 18 of 57 TAKE nouns and 24 of 54 DROP nouns. The Spectrum has an unconditional `TAKE x → GET` entry for each object, and the C64 does not.
+* **Status tables.** C64: starts with `AT 0 → SET 5, ANYKEY, GOTO 78, DESC` and keeps a counter in flag 5. Spectrum: starts with `NOTZERO 14, PRESENT 70 → DESTROY, MESSPRINT`, and uses `AT 0 → RESTORE, GOTO 68`.
+
+The two versions implement the same puzzles, with the same deaths and the same messages. They are not renumbered copies of one another. Numbers, order, conditions and actions all differ, and the Spectrum uses engine features that the Quill lacks. That rules out a mechanical conversion of the tables. The tables look like a re-implementation by hand, and the matched room, object and message texts suggest that the author worked from the same game design and text. The exact method is not recoverable from the files.
