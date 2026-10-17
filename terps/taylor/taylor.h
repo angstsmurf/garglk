@@ -77,7 +77,7 @@
 /* Terminator byte that marks the end of a status or command action table. */
 #define ACTION_TABLE_END 0x7F
 
-/* Word code used as a wildcard in command-table verb/noun entries — matches
+/* Word code used as a wildcard in event-table verb/noun entries — matches
    any input word. */
 #define WORD_WILDCARD    126
 
@@ -104,9 +104,11 @@ typedef enum {
     NUMGAMES
 } GameIDType;
 
-/* Indices into the per-game system-message table (compass directions,
-   "Inventory", "OK", "You can't go that way", etc.). Order is fixed
-   because the loader populates the table positionally. */
+/* The game's own system messages (compass directions, "Inventory", "OK",
+   "You can't go that way", etc.) by their number in its message table;
+   SysMessage() maps them for Questprobe 3. The interpreter's own messages
+   (undo, transcript, save states) are not in the games and are written
+   out where they are printed. */
 typedef enum {
     YOU_SEE,
     NORTH,
@@ -141,31 +143,6 @@ typedef enum {
     NOWWORN,
     NO_HELP_AVAILABLE,
     I_DONT_UNDERSTAND_THAT_VERB,
-    EXITS_DELIMITER,
-    MESSAGE_DELIMITER,
-    ITEM_DELIMITER,
-    WHAT,
-    YES,
-    NO,
-    ANSWER_YES_OR_NO,
-    ARE_YOU_SURE,
-    MOVE_UNDONE,
-    CANT_UNDO_ON_FIRST_TURN,
-    NO_UNDO_STATES,
-    SAVED,
-    CANT_USE_ALL,
-    TRANSCRIPT_OFF,
-    TRANSCRIPT_ON,
-    NO_TRANSCRIPT,
-    TRANSCRIPT_ALREADY,
-    FAILED_TRANSCRIPT,
-    TRANSCRIPT_START,
-    TRANSCRIPT_END,
-    BAD_DATA,
-    STATE_SAVED,
-    STATE_RESTORED,
-    NO_SAVED_STATE,
-    LAST_SYSTEM_MESSAGE
 } SysMessageType;
 
 /* Condition opcodes from Taylor's action tables. Values match the
@@ -181,22 +158,22 @@ typedef enum {
     ABSENT,
     NOTHERE,
     CARRIED,
-    NOTCARRIED,
+    NOTCARR,
     WORN,
     NOTWORN,
-    NODESTROYED,
-    DESTROYED,
+    CREATED,
+    NOTCREATED,
     ZERO,
     NOTZERO,
-    WORD1,
-    WORD2,
-    WORD3,
+    W3,
+    W4,
+    W5,
     CHANCE,
     LT,
     GT,
     EQ,
     NE,
-    OBJECTAT,
+    OBJECT,
     COND26,
     COND27,
     COND28,
@@ -209,21 +186,21 @@ typedef enum {
    codes stored in the original game data and must stay in order. */
 typedef enum {
     ACTIONERROR,
-    LOADPROMPT,
-    QUIT,
-    SHOWINVENTORY,
+    RESTORE,
+    END,
+    INVENT,
     ANYKEY,
     SAVE,
     DROPALL,
     LOOK,
-    PRINTOK,
+    OK,
     GET,
     DROP,
     GOTO,
     GOBY,
     SET,
     CLEAR,
-    MESSAGE,
+    MESSPRINT,
     CREATE,
     DESTROY,
     PRINT,
@@ -231,9 +208,9 @@ typedef enum {
     WEAR,
     REMOVE,
     LET,
-    ADD,
-    SUB,
-    PUT,
+    PLUS,
+    MINUS,
+    PLACE,
     SWAP,
     SWAPF,
     MEANS,
@@ -244,11 +221,11 @@ typedef enum {
     RAMLOAD,
     CLSLOW,
     OOPS,
-    DIAGNOSE,
-    SWITCHINVENTORY,
-    SWITCHCHARACTER,
-    DONE,
-    IMAGE,
+    WATCH,
+    SWITCH,
+    GOTOH,
+    PICTURE,
+    ACT40,
     ACT41,
     ACT42,
     ACT43,
@@ -292,10 +269,13 @@ typedef struct {
 
     int start_of_dictionary;
     int start_of_tokens;
+    /* The first TOKEN_SIGNATURE_LENGTH bytes of the token table, for the
+       games where it is found by looking for them. */
+    const char *token_signature;
     int start_of_room_descriptions;
     int start_of_item_descriptions;
-    int start_of_automatics;
-    int start_of_actions;
+    int start_of_status_table;
+    int start_of_event_table;
     int start_of_room_connections;
     int start_of_flags;
     int start_of_item_locations;
@@ -310,10 +290,12 @@ typedef struct {
     int start_of_image_instructions;
     int number_of_pictures;
     palette_type palette;
-    int start_of_intro_text;
 } GameInfo;
 
-/* Registry of all supported games, indexed by GameIDType. */
+#define TOKEN_SIGNATURE_LENGTH 10
+
+/* Registry of all supported games. The rows are not in GameIDType order:
+   use FindGameByID(). */
 extern GameInfo games[NUMGAMES];
 
 #include "actions.h"

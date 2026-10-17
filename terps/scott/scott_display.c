@@ -58,7 +58,9 @@ static int pause_next_room_description = 0;
 static void PrintWindowDelimiter(void)
 {
     glk_window_get_size(Top, &TopWidth, &TopHeight);
-    glk_window_move_cursor(Top, 0, TopHeight - 1);
+    /* Without a status window the line goes into the main text window */
+    if (Top != Bottom)
+        glk_window_move_cursor(Top, 0, TopHeight - 1);
     glk_stream_set_current(glk_window_get_stream(Top));
     if (Options & SPECTRUM_STYLE)
         for (unsigned i = 0; i < TopWidth; i++)
@@ -80,6 +82,11 @@ static char *OpenRoomDescriptionStream(void)
     return buf;
 }
 
+static void PrintTopLine(winid_t win, const char *line)
+{
+    Display(win, "%s", line);
+}
+
 /* Close the room description memory stream and render its contents.
    In split-screen mode, the text is line-broken to fit the top window;
    otherwise it's printed inline in the main window. Also handles
@@ -94,51 +101,9 @@ static void FlushRoomDescription(char *buf)
     int print_delimiter = (Options & (TRS80_STYLE | SPECTRUM_STYLE | TI994A_STYLE));
 
     if (split_screen) {
-        glk_window_clear(Top);
-        glk_window_get_size(Top, &TopWidth, &TopHeight);
-        int rows, length;
-        char *text_with_breaks = LineBreakText(buf, TopWidth, &rows, &length);
-
-        glui32 bottomheight;
-        glk_window_get_size(Bottom, NULL, &bottomheight);
-        winid_t o2 = glk_window_get_parent(Top);
-        if (!(bottomheight < 3 && TopHeight < (glui32)rows)) {
-            glk_window_get_size(Top, &TopWidth, &TopHeight);
-            glk_window_set_arrangement(o2, winmethod_Above | winmethod_Fixed, rows,
-                Top);
-        } else {
+        if (!ShowTextInTopWindow(Top, Bottom, buf, PrintTopLine))
             print_delimiter = 0;
-        }
-
-        int line = 0;
-        int index = 0;
-        glui32 i;
-        char string[DISPLAY_BUFFER_SIZE];
-        if (TopWidth > DISPLAY_BUFFER_SIZE - 1)
-            TopWidth = DISPLAY_BUFFER_SIZE - 1;
-        for (line = 0; line < rows && index < length; line++) {
-            for (i = 0; i < TopWidth; i++) {
-                string[i] = text_with_breaks[index++];
-                if (string[i] == '\n' || string[i] == '\r' || index >= length)
-                    break;
-            }
-            if (i < TopWidth + 1) {
-                string[i++] = '\n';
-            }
-            string[i] = 0;
-            if (strlen(string) == 0)
-                break;
-            glk_window_move_cursor(Top, 0, line);
-            Display(Top, "%s", string);
-        }
-
-        if (line < rows - 1) {
-            glk_window_get_size(Top, &TopWidth, &TopHeight);
-            glk_window_set_arrangement(o2, winmethod_Above | winmethod_Fixed,
-                MIN((glui32)(rows - 1), TopHeight - 1), Top);
-        }
-
-        free(text_with_breaks);
+        glk_window_get_size(Top, &TopWidth, &TopHeight);
     } else {
         Display(Bottom, "%s", buf);
     }
@@ -171,6 +136,8 @@ int ItIsDark(void)
 
 void DrawBlack(void)
 {
+    if (Graphics == NULL)
+        return;
     glk_window_fill_rect(Graphics, 0, x_offset, 0, ZX_PICTURE_WIDTH * (glui32)pixel_size,
         ZX_PICTURE_HEIGHT * (glui32)pixel_size);
 }
@@ -211,10 +178,12 @@ void OpenTopWindow(void)
 }
 
 /* Close the status window, for a full-height picture sequence.
-   OpenTopWindow() brings it back. */
+   OpenTopWindow() brings it back. Without split screen there is no
+   status window, and Top is the main text window. */
 void CloseTopWindow(void)
 {
-    glk_window_close(Top, NULL);
+    if (Top != NULL && Top != Bottom)
+        glk_window_close(Top, NULL);
     Top = NULL;
 }
 
@@ -235,8 +204,8 @@ glui32 OptimalPictureSize(glui32 graphwidth, glui32 graphheight, glui32 *outwidt
     return multiplier;
 }
 
-/* Scale the image to the Graphics window: set pixel_size, and x_offset and
-   right_margin to centre it horizontally. The window height and the scaled
+/* Scale the image to the Graphics window: set pixel_size, and x_offset to
+   centre it horizontally. The window height and the scaled
    image height are returned in graphheight and optimal_height. */
 void FitPictureToGraphicsWindow(glui32 *graphheight, glui32 *optimal_height)
 {
@@ -244,25 +213,35 @@ void FitPictureToGraphicsWindow(glui32 *graphheight, glui32 *optimal_height)
     glk_window_get_size(Graphics, &graphwidth, graphheight);
     pixel_size = OptimalPictureSize(graphwidth, *graphheight, &optimal_width, optimal_height);
     x_offset = ((int)graphwidth - (int)optimal_width) / 2;
-    right_margin = optimal_width + x_offset;
+}
+
+/* Whether pictures can be shown at all: the Glk library has graphics
+   windows and, in Spatterlight, the graphics setting is on. Gargoyle
+   answers no here when its "graphics" setting is 0. */
+int GraphicsEnabled(void)
+{
+#ifdef SPATTERLIGHT
+    if (!gli_enable_graphics)
+        return 0;
+#endif
+    return glk_gestalt(gestalt_Graphics, 0) != 0;
 }
 
 /* Open the graphics window between the status window and the main text
    window, sized to fit the game's native image resolution at the best
-   integer scale. Re-opens the status window above it if needed. */
+   integer scale. Re-opens the status window above it if needed. Without
+   split screen (Top == Bottom) there is no status window to re-open. */
 void OpenGraphicsWindow(void)
 {
-#ifdef SPATTERLIGHT
-    if (!gli_enable_graphics)
+    if (!GraphicsEnabled())
         return;
-#endif
     glui32 graphheight, optimal_height;
 
     if (Top == NULL)
         Top = FindGlkWindowWithRock(GLK_STATUS_ROCK);
     if (Graphics == NULL)
         Graphics = FindGlkWindowWithRock(GLK_GRAPHICS_ROCK);
-    if (Graphics == NULL && Top != NULL) {
+    if (Graphics == NULL && Top != NULL && Top != Bottom) {
         glk_window_get_size(Top, &TopWidth, &TopHeight);
         glk_window_close(Top, NULL);
         Graphics = glk_window_open(Bottom, winmethod_Above | winmethod_Proportional,
@@ -307,7 +286,8 @@ void CloseGraphicsWindow(void)
     if (Graphics) {
         glk_window_close(Graphics, NULL);
         Graphics = NULL;
-        glk_window_get_size(Top, &TopWidth, &TopHeight);
+        if (Top != NULL)
+            glk_window_get_size(Top, &TopWidth, &TopHeight);
     }
 }
 
@@ -315,10 +295,8 @@ void CloseGraphicsWindow(void)
    Howarth vector graphics (format 99) or bitmap picture number. */
 void DrawImage(int image)
 {
-#ifdef SPATTERLIGHT
-    if (!gli_enable_graphics)
+    if (!GraphicsEnabled())
         return;
-#endif
     OpenGraphicsWindow();
     if (Graphics == NULL) {
         debug_print("DrawImage: Graphic window NULL?\n");
@@ -351,7 +329,7 @@ void DrawRoomItemImages(void)
    darkness (black screen or fuzzy image), US-variant layout, and
    game-specific overrides (Seas of Blood, Robin of Sherwood, Hulk,
    Gremlins, Savage Island). Also draws visible item overlays. */
-static void DrawRoomImage(void)
+void DrawRoomImage(void)
 {
     if (CurrentGame == ADVENTURELAND || CurrentGame == ADVENTURELAND_C64) {
         AdventurelandDarkness();
@@ -595,6 +573,12 @@ void Look(void)
 
     FlushRoomDescription(buf);
 }
+
+static void WriteToLowerWindow(const char *fmt, ...)
+#ifdef __GNUC__
+    __attribute__((__format__(__printf__, 1, 2)))
+#endif
+    ;
 
 static void WriteToLowerWindow(const char *fmt, ...)
 {

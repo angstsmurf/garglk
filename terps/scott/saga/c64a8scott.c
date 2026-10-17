@@ -16,25 +16,20 @@
 
 static USImage *current_image = NULL;
 
-static int C64A8AdjustScott(int width, int height, int *x_origin) {
+static void C64A8AdjustScott(struct c64a8_bounds *bounds) {
     USImage *image = current_image;
-    if (image == NULL)
-        return width;
+    if (image == NULL || Graphics == NULL)
+        return;
 
     glui32 curheight, curwidth;
     glk_window_get_size(Graphics, &curwidth, &curheight);
 
-    if (image->usage == IMG_ROOM || (width == 38 && *x_origin < 1)) {
-        width = width - 1 - image->cropright / 8;
+    if (image->usage == IMG_ROOM || (bounds->right == 38 && bounds->left < 1)) {
+        bounds->right = bounds->right - 1 - image->cropright / 8;
         left_margin = image->cropleft;
 
-        ImageWidth = width * 8 - 17 + left_margin;
-        ImageHeight = height + 2;
-
-        if (image->index == 19 && image->systype == SYS_ATARI8) {
-            width++;
-            ImageWidth = 308;
-        }
+        ImageWidth = bounds->right * 8 - 17 + left_margin;
+        ImageHeight = bounds->bottom + 2;
 
         glui32 width_in_pixels = ImageWidth * pixel_size;
         while (width_in_pixels > curwidth && pixel_size > 1) {
@@ -42,7 +37,7 @@ static int C64A8AdjustScott(int width, int height, int *x_origin) {
             width_in_pixels = ImageWidth * pixel_size;
         }
 
-        x_offset = (curwidth - width_in_pixels) / 2;
+        x_offset = ((int)curwidth - (int)width_in_pixels) / 2;
 
         glui32 optimal_height = ImageHeight * pixel_size;
 
@@ -53,13 +48,24 @@ static int C64A8AdjustScott(int width, int height, int *x_origin) {
                                            optimal_height, NULL);
         }
     }
+}
 
-    return width;
+static enum c64a8_variant C64A8Variant(USImage *image)
+{
+    // Claymorgue is the only game with these images on the C64
+    if (image->systype == SYS_C64)
+        return C64A8_C64_CLAYMORGUE;
+    if (CurrentGame == COUNT_US || CurrentGame == VOODOO_CASTLE_US)
+        return C64A8_ATARI8_COUNT_VOODOO;
+    return C64A8_ATARI8;
 }
 
 int DrawC64A8Image(USImage *image)
 {
     current_image = image;
-    return DrawC64A8ImageFromData(image->imagedata, image->datasize, CurrentGame == COUNT_US || CurrentGame == VOODOO_CASTLE_US, C64A8AdjustScott, image->systype == SYS_C64);
+    StartPixelRuns();
+    int result = DrawC64A8ImageFromData(image->imagedata, image->datasize, C64A8AdjustScott, C64A8Variant(image));
+    FlushPixelRuns();
+    return result;
 }
 

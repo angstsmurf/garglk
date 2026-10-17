@@ -7,6 +7,7 @@
 
 #include <string.h>
 
+#include "aiukpalette.h"
 #include "sagagraphics.h"
 #include "apple2draw.h"
 #include "game_specific.h"
@@ -18,21 +19,53 @@
 #include "scott_actions.h"
 #include "scott_display.h"
 
+/* DefinePalette() gives every palette but these three the C64 colours,
+   in which white is 1 and blue is 6. The others are in Spectrum order:
+   bright white is 15 and bright blue is 9. */
+static int HasC64Colours(void)
+{
+    return palchosen != ZX && palchosen != ZXOPT && palchosen != VGA;
+}
+
+int WhiteColour(void)
+{
+    return HasC64Colours() ? 1 : 15;
+}
+
+int BlueColour(void)
+{
+    return HasC64Colours() ? 6 : 9;
+}
+
+/* Secret Mission */
+enum {
+    ROOM_AFTER_EXPLOSION = 1, /* The blank room the bomb leaves */
+    ROOM_VISITORS_ROOM = 13, /* Large white visitors room */
+};
+
+enum {
+    ITEM_SECURITY_ID = 1, /* Picture of me stamped -security- */
+    ITEM_VISITOR_ID = 7,
+    ITEM_MAINTENANCE_ID = 8,
+    ITEM_PROJECTOR = 21, /* Movie projector with film cartridge */
+    ITEM_SABOTEUR_ID = 41, /* ... stamped -window maintenance- */
+};
+
 void UpdateSecretAnimations(void)
 {
-    if (MyLoc != 13 || AnimationFlag == 0) {
+    if (MyLoc != ROOM_VISITORS_ROOM || AnimationFlag == 0) {
         glk_request_timer_events(0);
         AnimationFlag = 0;
         return;
     }
     /* Roll down */
     if (AnimationFlag > 0 && AnimationFlag < 48) {
-        RectFill(113, 0, 102, AnimationFlag, white_colour);
+        RectFill(113, 0, 102, AnimationFlag, WhiteColour());
         AnimationFlag++;
     }
     /* Flicker */
     if (AnimationFlag >= 48 && AnimationFlag < 100) {
-        if (Items[21].Location == 0) {
+        if (Items[ITEM_PROJECTOR].Location == 0) {
             /* Image 30 is a white square */
             DrawImage(30);
             glk_request_timer_events(0);
@@ -63,19 +96,19 @@ void SecretAction(int p)
     case 1: /* Bomb explodes */
         if (split_screen) {
             CloseTopWindow();
-            MyLoc = 1;
-            Rooms[1].Image = 25; /* BOOM */
-            DrawImage(25);
-            Delay(2);
-            DrawImage(26);
-            Rooms[1].Image = 26; /* Mushroom cloud */
+            MyLoc = ROOM_AFTER_EXPLOSION;
         }
+        Rooms[ROOM_AFTER_EXPLOSION].Image = 25; /* BOOM */
+        DrawImage(25);
+        Delay(2);
+        DrawImage(26);
+        Rooms[ROOM_AFTER_EXPLOSION].Image = 26; /* Mushroom cloud */
         break;
     case 2: /* ID picture */
         DrawImage(24);
-        if (IsPresent(1)) {
+        if (IsPresent(ITEM_SECURITY_ID)) {
             DrawImage(27); // "Security" label
-        } else if (IsPresent(7) && !IsPresent(8) && !IsPresent(41)) {
+        } else if (IsPresent(ITEM_VISITOR_ID) && !IsPresent(ITEM_MAINTENANCE_ID) && !IsPresent(ITEM_SABOTEUR_ID)) {
             DrawImage(28); /* "Visitor" label */
         }
         showing_closeup = 1;
@@ -84,9 +117,9 @@ void SecretAction(int p)
         break;
     case 3: /* Screen rolls down */
     case 4:
-        oldimage = Rooms[13].Image;
+        oldimage = Rooms[ROOM_VISITORS_ROOM].Image;
         /* Image 30 is a white square */
-        Rooms[13].Image = 30;
+        Rooms[ROOM_VISITORS_ROOM].Image = 30;
         DrawBlack();
         AnimationFlag = 1;
         glk_request_timer_events(10);
@@ -101,7 +134,7 @@ void SecretAction(int p)
             glk_select(&ev);
             Updates(ev);
         } while (AnimationFlag < 200);
-        Rooms[13].Image = oldimage;
+        Rooms[ROOM_VISITORS_ROOM].Image = oldimage;
         AnimationFlag = 0;
         break;
     default:
@@ -142,6 +175,10 @@ void AdventurelandAction(int p)
         fprintf(stderr, "Adventureland: Unsupported action parameter %d!\n", p);
         return;
     }
+    /* The original shows nothing, and does not wait for a key, when
+       pictures are switched off. */
+    if (!GraphicsEnabled() && !closeups_without_graphics)
+        return;
     DrawImage(image);
     Output("\n");
     Output(sys[HIT_ENTER]);
@@ -160,11 +197,14 @@ void MapSysMessages(const SysMessageType *keys, size_t n, int src_offset)
 }
 
 /* Map the consecutive sys[] slots first to last to the consecutive
-   system_messages[] starting at index src. */
-void MapSysRange(SysMessageType first, SysMessageType last, int src)
+   system_messages[] starting at index src. Returns the index after the
+   last one used, so that ranges which follow each other in the game's
+   table can be chained without typing each start index. */
+int MapSysRange(SysMessageType first, SysMessageType last, int src)
 {
     for (int i = first; i <= (int)last; i++)
         sys[i] = system_messages[src - first + i];
+    return src + (int)last - (int)first + 1;
 }
 
 static void CopyWordList(const char **dest, const char **src, int count)
@@ -572,223 +612,131 @@ void ShowUSCloseup(int image, int offset) {
     }
 }
 
-void VoodooShowImageOnExamineUS(int noun)
+/* The original interpreters have a table of close-up pictures, which the
+   loaders that know where it is hand over: looking at the noun of an entry
+   shows its picture if its item is carried or in the room. */
+/* The sixteen of an original table and a few of our own. */
+#define MAX_CLOSEUPS 24
+
+static struct {
+    int item;
+    int noun;
+    int image;
+} closeups[MAX_CLOSEUPS];
+
+static int num_closeups = 0;
+static int closeup_verb = -1;
+static int closeups_are_us_pictures = 0;
+
+/* Starts a new table. us_pictures is whether the pictures are the room
+   pictures of a US release rather than the numbered ones of a UK one. */
+void SetCloseupVerb(int verb, int us_pictures)
 {
-    int image = -1;
-    switch (noun) {
-    case 8: // Count Cristo
-        if (Items[27].Location == MyLoc)
-            image = 11;
+    closeup_verb = verb;
+    closeups_are_us_pictures = us_pictures;
+    num_closeups = 0;
+}
+
+void AddCloseup(int item, int noun, int image)
+{
+    if (num_closeups == MAX_CLOSEUPS || item < 0 || item > GameHeader.NumItems)
+        return;
+    closeups[num_closeups].item = item;
+    closeups[num_closeups].noun = noun;
+    closeups[num_closeups].image = image;
+    num_closeups++;
+}
+
+/* Gives the picture of the entry for item and noun to another item and
+   noun as well. Does nothing if the table has no such entry, or already
+   has the other one. */
+static void AddCloseupAlias(int item, int noun, int alias_item, int alias_noun)
+{
+    for (int i = 0; i < num_closeups; i++) {
+        if (closeups[i].item == alias_item && closeups[i].noun == alias_noun)
+            return;
+    }
+    for (int i = 0; i < num_closeups; i++) {
+        if (closeups[i].item == item && closeups[i].noun == noun) {
+            AddCloseup(alias_item, alias_noun, closeups[i].image);
+            return;
+        }
+    }
+}
+
+/* Close-ups that the originals do not show but that are nice to have: an
+   item that turns into another one loses its picture in the original, and
+   so does an obvious other word for it. To be called once the table of
+   the game has been read. */
+void AddExtraCloseups(GameIDType game)
+{
+    switch (game) {
+    case ADVENTURELAND_US:
+        AddCloseupAlias(24, 23, 26, 23); /* Bees in a bottle */
         break;
-    case 13: // Broken sword
-        if (IsPresent(33))
-            image = 0;
+    case STRANGE_ODYSSEY_US:
+        AddCloseupAlias(10, 22, 11, 22); /* The other phaser */
+        AddCloseupAlias(30, 8, 31, 8); /* The other hound */
         break;
-    case 55: // Voodoo doll
-        if (IsPresent(44))
-            image = 1;
+    case VOODOO_CASTLE_US:
+        AddCloseupAlias(40, 42, 38, 42); /* Chemicals before they are mixed */
+        /* Count Cristo is LOOK COFFIN on the Apple II and LOOK MAN on the
+           Atari. */
+        AddCloseupAlias(27, 8, 27, 53);
+        AddCloseupAlias(27, 53, 27, 8);
         break;
-    case 63: // Voodoo book
-        if (IsPresent(52))
-            image = 2;
-        break;
-    case 32: // Ring
-        if (IsPresent(25))
-            image = 3;
-        break;
-    case 43: // Ju-ju man statue
-        if (IsPresent(53))
-            image = 4;
-        break;
-    case 9: // Glowing idol
-        if (IsPresent(9))
-            image = 5;
-        if (IsPresent(43))
-            image = 10;
-        break;
-    case 42: // Chemicals
-        if (IsPresent(38))
-            image = 6;
-        break;
-    case 7: // Bloody knife
-        if (IsPresent(0))
-            image = 7;
+    case HULK_US:
+    case HULK_US_PREL:
+        AddCloseupAlias(27, 66, 27, 26); /* LOOK BASE for the gas outlet */
+        /* Fallthrough */
+    case HULK:
+    case HULK_C64:
+        /* LOOK GEM for the bio-gem, which only some US releases have */
+        AddCloseupAlias(18, 124, 18, 41);
         break;
     default:
         break;
     }
-
-    ShowUSCloseup(image, 90);
 }
 
-void CountShowImageOnExamineUS(int noun)
+int HasCloseupTable(void)
 {
-    int image = -1;
-    switch (noun) {
-    case 21: // Package
-        if (IsPresent(45))
-            image = 0;
-        break;
-    case 50: // Crowd
-        if (Items[50].Location == MyLoc)
-            image = 1;
-        break;
-    default:
-        break;
-    }
-
-    ShowUSCloseup(image, 90);
+    return closeup_verb != -1;
 }
 
-void AdventurelandShowImageOnExamineUS(int noun) {
-    int image = -1;
-    switch (noun) {
-        case 59: /* Firestone */
-            if (IsPresent(56) || Items[0].Location == MyLoc)
-                image = 1;
-            break;
-        case 23: /* Bees */
-            if (IsPresent(24) || IsPresent(26))
-                image = 2;
-            break;
-        case 26: /* Flint and steel */
-            if (IsPresent(28))
-                image = 3;
-            break;
-        case 54: /* Stream of lava */
-            if (Items[34].Location == MyLoc)
-                image = 4;
-            break;
-        case 10: /* Magic mirror */
-            if (IsPresent(38))
-                image = 5;
-            break;
-        case 46: /* Chiggers */
-            if (IsPresent(42))
-                image = 6;
-            break;
-        case 43: /* Jewelled Fruit */
-            if (IsPresent(46))
-                image = 7;
-            break;
-        case 44: /* Blue Ox */
-            if (IsPresent(47))
-                image = 8;
-            break;
-        case 39: /* Dragon */
-            if (Items[27].Location == MyLoc)
-                image = 9;
-            break;
-        default:
-            break;
-    }
-
-    ShowUSCloseup(image, 80);
+/* For the tests. Returns 0 when there is no such entry. */
+int GetCloseup(int index, int *verb, int *item, int *noun, int *image)
+{
+    if (index < 0 || index >= num_closeups)
+        return 0;
+    *verb = closeup_verb;
+    *item = closeups[index].item;
+    *noun = closeups[index].noun;
+    *image = closeups[index].image;
+    return 1;
 }
 
-void PirateShowImageOnExamineUS(int noun) {
-    int image = -1;
-    switch (noun) {
-        case 34: /* Plans */
-            if (IsPresent(29))
-                image = 1;
-            break;
-        case 10: /* Book */
-            if (IsPresent(3))
-                image = 2;
-            break;
-        case 66: /* Stamps */
-            if (IsPresent(50))
-                image = 3;
-            break;
-        case 38: /* Coffin */
-            if (IsPresent(13))
-                image = 4;
-            break;
-        case 29: /* DUBLOONS */
-            if (IsPresent(22))
-                image = 5;
-            break;
-        case 53: /* Map */
-            if (IsPresent(45))
-                image = 6;
-            break;
-        case 39: /* Parrot */
-            if (IsPresent(24))
-                image = 7;
-            break;
-        default:
-            break;
+/* The original searches from the end, and when a noun has several entries
+   it shows the last one whose item is there. */
+/* For the headless tests only, which have no graphics but still want the
+   table looked up: go through with a close-up (and its key press) anyway. */
+int closeups_without_graphics = 0;
+
+void ShowCloseupOnExamine(int verb, int noun)
+{
+    if (verb != closeup_verb || noun == 0)
+        return;
+    /* Like the original, show nothing (and do not wait for a key) when
+       pictures are switched off. */
+    if (!GraphicsEnabled() && !closeups_without_graphics)
+        return;
+    for (int i = num_closeups - 1; i >= 0; i--) {
+        if (closeups[i].noun != noun || !IsPresent(closeups[i].item))
+            continue;
+        if (closeups_are_us_pictures)
+            ShowUSCloseup(closeups[i].image, 0);
+        else
+            ShowCloseup(closeups[i].image);
+        return;
     }
-
-    ShowUSCloseup(image, 80);
-}
-
-void MissionShowImageOnExamineUS(int noun) {
-    int image = -1;
-    switch (noun) {
-        case 14: // "Picture"
-            if (IsPresent(1)) {
-                image = 1; // Security
-            } else if (IsPresent(41)) {
-                image = 3; // Maintenance
-            } else if (IsPresent(7)) {
-                image = 2; // Visitor
-            }
-            break;
-        case 7: // Recorder
-            if (IsPresent(3))
-                image = 4;
-            break;
-        case 29: // Bomb
-            if (IsPresent(28))
-                image = 5;
-            break;
-        default:
-            break;
-    }
-
-    ShowUSCloseup(image, 80);
-}
-
-void StrangeShowImageOnExamineUS(int noun) {
-    int image = -1;
-    switch (noun) {
-        case 22: // Phaser
-            if (IsPresent(10) || IsPresent(11))
-                image = 1;
-            break;
-        case 30: // Control Console
-            if (Items[5].Location == MyLoc)
-                image = 2;
-            break;
-        case 41: // Small piece of plastic flush in the wall
-            if (Items[25].Location == MyLoc)
-                image = 3;
-            break;
-        case 69: /* Sculpture */
-            if (Items[44].Location == 0 && IsPresent(50))
-                image = 4;
-            break;
-        case 75: /* Goggles */
-            if (IsPresent(51))
-                image = 5;
-            break;
-        case 58: /* Belt */
-            if (Items[44].Location == CARRIED || Items[44].Location == MyLoc)
-                image = 6;
-            break;
-        case 8: /* Hound */
-            if (Items[30].Location == MyLoc || IsPresent(31))
-                image = 7;
-            break;
-        case 56: /* Ice Diamond */
-            if (IsPresent(43))
-                image = 8;
-            break;
-        default:
-            break;
-    }
-
-    ShowUSCloseup(image, 80);
 }

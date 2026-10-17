@@ -17,6 +17,7 @@
 #include "glkstart.h"
 
 #include "animations.h"
+#include "extracommands.h"
 #include "layouttext.h"
 #include "graphics.h"
 #include "irmak.h"
@@ -26,8 +27,9 @@
 
 winid_t Bottom, Top, Graphics;
 winid_t CurrentWindow;
-static int OutCount;            /* Number of bytes currently buffered in OutWord. */
+static size_t OutCount;     /* Number of bytes currently buffered in OutWord. */
 static char OutWord[128];   /* Per-word output buffer, flushed on whitespace. */
+static int JustWroteNewline = 0; /* Suppresses runs of blank lines in Bottom */
 
 static glui32 TopWidth; /* Terminal width */
 static glui32 TopHeight = 1; /* Height of top window */
@@ -37,24 +39,55 @@ int LineEvent = 0;
 int Resizing = 0;
 static int GraphicsOff = 0;
 
+/* Format a message, up to 2047 characters, and print it to a Glk stream */
+void PrintToStreamV(strid_t stream, const char *fmt, va_list ap)
+{
+    char msg[2048];
+    vsnprintf(msg, sizeof msg, fmt, ap);
+    glk_put_string_stream(stream, msg);
+}
+
 /* printf-style wrapper that writes formatted text to a Glk window. */
 void Display(winid_t w, const char *fmt, ...)
 {
     va_list ap;
-    char msg[2048];
-
-    int size = sizeof msg;
-
     va_start(ap, fmt);
-    vsnprintf(msg, size, fmt, ap);
+    PrintToStreamV(glk_window_get_stream(w), fmt, ap);
     va_end(ap);
-
-    glk_put_string_stream(glk_window_get_stream(w), msg);
 }
 
-static void WordFlush(winid_t win);
+/* Emit the contents of the per-word buffer OutWord to the given window
+   (or, for the top window, to the room-description memory stream that
+   FlushRoomDescription later relays out). */
+static void WordFlush(winid_t win)
+{
+    /* A buffered nul prints as nothing. */
+    size_t len = 0;
+    for (size_t i = 0; i < OutCount; i++) {
+        if (OutWord[i] != '\0')
+            OutWord[len++] = OutWord[i];
+    }
+    OutCount = 0;
+    if (len == 0)
+        return;
+    /* Without a status window Top is Bottom (OpenTopWindow), and everything
+       is plain scrollback. */
+    if (win == Top && Top != Bottom) {
+        if (room_description_stream != NULL)
+            glk_put_buffer_stream(room_description_stream, OutWord, (glui32)len);
+    } else {
+        glk_put_buffer_stream(glk_window_get_stream(win), OutWord, (glui32)len);
+    }
+}
 
-static int JustWroteNewline = 0;
+/* Add c to the word being buffered, and write the word out to win once it
+   is limit characters long or fills the buffer. */
+static void AppendToWord(unsigned char c, winid_t win, size_t limit)
+{
+    OutWord[OutCount++] = (char)c;
+    if (OutCount >= limit || OutCount >= sizeof OutWord)
+        WordFlush(win);
+}
 
 /* Lowest-level character output. Buffers characters into OutWord until a
    whitespace boundary, then dispatches the whole word to either the
@@ -91,13 +124,9 @@ void PrintCharacter(unsigned char c)
             return;
         }
         JustWroteNewline = 0;
-        OutWord[OutCount] = c;
-        OutCount++;
-        /* Flush before the buffer overflows; words longer than 128 chars
-           will be split, but that's acceptable for game text. */
-        if (OutCount > 127)
-            WordFlush(Bottom);
-        return;
+        /* Words longer than the buffer are split, which is acceptable
+           for game text. */
+        AppendToWord(c, Bottom, sizeof OutWord);
     } else {
         /* Top window path: characters go to an in-memory stream that
            FlushRoomDescription later wraps and writes to the grid. */
@@ -109,14 +138,10 @@ void PrintCharacter(unsigned char c)
             }
             return;
         }
-        OutWord[OutCount] = c;
-        OutCount++;
         /* In the top window we wrap at the actual terminal width so the
            subsequent layout pass can break lines correctly. */
-        if (OutCount == TopWidth)
-            WordFlush(Top);
+        AppendToWord(c, Top, TopWidth);
     }
-    return;
 }
 
 /* Block until the user types any character, then return its keycode.
@@ -133,30 +158,6 @@ unsigned char WaitCharacter(void)
         Updates(ev);
     } while (ev.type != evtype_CharInput);
     return ev.val1;
-}
-
-/* Emit the contents of the per-word buffer OutWord to the given window
-   (or, for the top window, to the room-description memory stream that
-   FlushRoomDescription later relays out). */
-static void WordFlush(winid_t win)
-{
-    /* A buffered nul prints as nothing. */
-    int len = 0;
-    for (int i = 0; i < OutCount; i++) {
-        if (OutWord[i] != '\0')
-            OutWord[len++] = OutWord[i];
-    }
-    OutCount = 0;
-    if (len == 0)
-        return;
-    /* Without a status window Top is Bottom (OpenTopWindow), and everything
-       is plain scrollback. */
-    if (win == Top && Top != Bottom) {
-        if (room_description_stream != NULL)
-            glk_put_buffer_stream(room_description_stream, OutWord, len);
-    } else {
-        glk_put_buffer_stream(glk_window_get_stream(win), OutWord, len);
-    }
 }
 
 static char *roomdescbuf = NULL;
@@ -195,10 +196,15 @@ static void PrintWindowDelimiter(void)
         glk_put_char(DelimiterChar);
 }
 
+static void PrintTopLine(winid_t win, const char *line)
+{
+    Display(win, "%s", line);
+}
+
 /* Reflow the buffered room description and paint it into the top window.
    Steps: close the memory stream, mirror to transcript, line-wrap to the
-   current top-window width, resize the top window to fit, blit line by
-   line, and finally draw the delimiter bar at the bottom. */
+   current top-window width, resize the top window to fit, and finally
+   draw the delimiter bar at the bottom. */
 static void FlushRoomDescription(void)
 {
     if (!room_description_stream)
@@ -214,70 +220,8 @@ static void FlushRoomDescription(void)
         glk_put_string_stream(Transcript, roomdescbuf);
     }
 
-    int print_delimiter = 1;
-
-    glk_window_clear(Top);
+    int print_delimiter = ShowTextInTopWindow(Top, Bottom, roomdescbuf, PrintTopLine);
     glk_window_get_size(Top, &TopWidth, &TopHeight);
-    int rows, length;
-    char *text_with_breaks = LineBreakText(roomdescbuf, TopWidth, &rows, &length);
-
-    /* If the bottom window is tiny (less than MIN_BOTTOM_ROWS) and the
-       room text would need more rows than the top window currently has,
-       leave the layout alone (and skip the delimiter) rather than shrink
-       the bottom window further. */
-    enum { MIN_BOTTOM_ROWS = 3 };
-    glui32 bottomheight;
-    glk_window_get_size(Bottom, NULL, &bottomheight);
-    winid_t o2 = glk_window_get_parent(Top);
-    if (!(bottomheight < MIN_BOTTOM_ROWS && TopHeight < rows)) {
-        glk_window_get_size(Top, &TopWidth, &TopHeight);
-        glk_window_set_arrangement(o2, winmethod_Above | winmethod_Fixed, rows,
-            Top);
-    } else {
-        print_delimiter = 0;
-    }
-
-    /* Walk the wrapped buffer one line at a time, emitting each into the
-       text-grid window via cursor moves. Trailing empty lines are tracked
-       so the final window height can be trimmed below. */
-    enum { LINE_BUF_SIZE = 2048 };
-    int line = 0;
-    int index = 0;
-    int i;
-    int empty_lines = 0;
-    char string[LINE_BUF_SIZE];
-    /* Room for a full line plus its newline and terminator. */
-    if (TopWidth > LINE_BUF_SIZE - 2)
-        TopWidth = LINE_BUF_SIZE - 2;
-    for (line = 0; line < rows && index < length; line++) {
-        for (i = 0; i < TopWidth; i++) {
-            string[i] = text_with_breaks[index++];
-            if (string[i] == '\n' || string[i] == '\r' || index >= length)
-                break;
-        }
-        string[i++] = '\n';
-        if (i < 2)
-            empty_lines++;
-        else
-            empty_lines = 0;
-        string[i] = 0;
-        if (strlen(string) == 0)
-            break;
-        glk_window_move_cursor(Top, 0, line);
-        Display(Top, "%s", string);
-    }
-
-    /* Trim trailing blank lines from the window height so the delimiter
-       sits flush against the actual text. */
-    line -= empty_lines;
-
-    if (line < rows - 1) {
-        glk_window_get_size(Top, &TopWidth, &TopHeight);
-        glk_window_set_arrangement(o2, winmethod_Above | winmethod_Fixed,
-            MIN(rows - 1, TopHeight - 1), Top);
-    }
-
-    free(text_with_breaks);
 
     if (print_delimiter) {
         PrintWindowDelimiter();
@@ -300,10 +244,6 @@ void BottomWindow(void)
     CurrentWindow = Bottom;
 }
 
-/* Sync the local Options bitfield and palette selection with the user's
-   Spatterlight preferences (delays, forced inventory mode, forced
-   palette, graphics on/off). Switches the palette and re-defines colors
-   if it changed. */
 /* Apply a tri-state preference (0 = auto, 1 = first choice, 2 = second)
    to a pair of mutually exclusive option bits. */
 static void SetExclusiveOption(int setting, int first, int second)
@@ -315,6 +255,10 @@ static void SetExclusiveOption(int setting, int first, int second)
         Options |= second;
 }
 
+/* Sync the local Options bitfield and palette selection with the user's
+   Spatterlight preferences (delays, forced inventory mode, forced
+   palette, graphics on/off). Switches the palette and re-defines colors
+   if it changed. */
 static void UpdateSettings(void)
 {
 #ifdef SPATTERLIGHT
@@ -388,8 +332,8 @@ void Updates(event_t ev)
 
 /* Native size of the in-game picture. Output is always scaled by an
    integer multiplier to keep the original pixel grid crisp. */
-#define IMAGE_WIDTH_IN_PIXELS 255
-#define IMAGE_HEIGHT_IN_PIXELS 96
+#define IMAGE_WIDTH_IN_PIXELS (IRMAK_IMGWIDTH * 8)
+#define IMAGE_HEIGHT_IN_PIXELS (IRMAK_IMGHEIGHT * 8)
 
 /* Compute the largest integer multiplier that lets the native-size image
    fit in the current graphics window. Returns the multiplier and writes
@@ -456,10 +400,8 @@ static void FitGraphicsWindow(int shrink_only)
    stacking order ends up as: bottom (buffer) → graphics → top (grid). */
 void OpenGraphicsWindow(void)
 {
-#ifdef SPATTERLIGHT
-    if (!gli_enable_graphics)
+    if (!TAYLOR_GRAPHICS_ENABLED)
         return;
-#endif
     if (Top == NULL)
         Top = FindGlkWindowWithRock(GLK_STATUS_ROCK);
     if (Graphics == NULL)
@@ -515,9 +457,11 @@ void OpenTopWindow(void)
    the player is in a dark room (no image to show). */
 void DrawBlack(void)
 {
+    if (!Graphics)
+        return;
     GraphicsWindowChanged();
-    glk_window_fill_rect(Graphics, 0, x_offset, 0, 32 * 8 * pixel_size,
-        12 * 8 * pixel_size);
+    glk_window_fill_rect(Graphics, 0, x_offset, 0, IMAGE_WIDTH_IN_PIXELS * pixel_size,
+        IMAGE_HEIGHT_IN_PIXELS * pixel_size);
 }
 
 /* Render the current room's picture into the graphics window. Skipped

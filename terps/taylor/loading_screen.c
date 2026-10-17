@@ -13,8 +13,12 @@
 #include "glk.h"
 #ifdef SPATTERLIGHT
 #include "glkimp.h"
+#else
+/* Only Spatterlight has a setting for this: the loading screen is drawn in
+   one go unless the -g option is given. */
+int gli_slowdraw = 0;
 #endif
-#include "decompressz80.h"      /* ExtractTapePayloads, SCREEN$ geometry/decode */
+#include "decompressz80.h"      /* ZX_RAM_BASE, SCREEN$ geometry, the Alkatraz loader */
 #include "zx_title.h"           /* shared ZXTitle renderer */
 #include "aiukpalette.h"            /* pal[], palchosen, ZXOPT, DefinePalette */
 #include "taylor.h"
@@ -23,7 +27,6 @@
 #include "utility.h"            /* MemAlloc, FindGlkWindowWithRock, rocks */
 
 #include "alkatraz_screen.h"
-#include "extracttape.h"          /* ZX_RAM_BASE */
 #include "loading_screen.h"
 
 uint8_t *ZXLoadingScreen = NULL;
@@ -38,9 +41,6 @@ static int AlkatrazDrawOrderLen = 0;
    all come from the shared ZXTitle renderer (zx_title.h) and
    decompressz80.h. */
 
-/* More data blocks than any tape we look at has */
-#define MAX_TAPE_BLOCKS 64
-
 void ZXSetDrawOrder(const uint16_t *order, int count)
 {
     if (count > ZX_SCREEN_SIZE)
@@ -50,34 +50,6 @@ void ZXSetDrawOrder(const uint16_t *order, int count)
     if (count > 0)
         memcpy(AlkatrazDrawOrder, order, count * sizeof AlkatrazDrawOrder[0]);
     AlkatrazDrawOrderLen = count;
-}
-
-/* The loading screen is, in practice, always the first standard-length
-   (6912-byte) data block on the tape. ExtractTapePayloads() returns only
-   the 0xFF data blocks (the 0x00 header blocks are skipped), with the
-   offset and length of each, so we just return the first that is exactly
-   one SCREEN$ in size. */
-uint8_t *FindTapeLoadingScreen(const uint8_t *raw, size_t raw_len, int is_tzx)
-{
-    size_t payloads_len = 0;
-    size_t block_offset[MAX_TAPE_BLOCKS], block_len[MAX_TAPE_BLOCKS];
-    int num_blocks = 0;
-
-    uint8_t *payloads = ExtractTapePayloads(raw, raw_len, is_tzx, &payloads_len,
-        block_offset, block_len, &num_blocks, MAX_TAPE_BLOCKS);
-    if (!payloads)
-        return NULL;
-
-    uint8_t *screen = NULL;
-    for (int i = 0; i < num_blocks; i++) {
-        if (block_len[i] == ZX_SCREEN_SIZE) {
-            screen = MemAlloc(ZX_SCREEN_SIZE);
-            memcpy(screen, payloads + block_offset[i], ZX_SCREEN_SIZE);
-            break;
-        }
-    }
-    free(payloads);
-    return screen;
 }
 
 /* Some Alkatraz-protected games (Kayleth, Terraquake) hide the loading screen
@@ -92,11 +64,10 @@ uint8_t *FindTapeLoadingScreen(const uint8_t *raw, size_t raw_len, int is_tzx)
 
    Returns a malloc'd 6912-byte SCREEN$ (caller frees) or NULL. */
 uint8_t *DecodeAlkatrazLoadingScreen(uint8_t *image, size_t length,
-    const uint8_t *descriptors, int num_windows, int block_index, int offset,
-    uint8_t key_seed, uint8_t key_step, uint8_t attr_fill)
+    const AlkatrazScreen *spec)
 {
     uint16_t order[ZX_SCREEN_SIZE];
-    int order_len = AlkatrazScreenOrder(descriptors, num_windows, order, ZX_SCREEN_SIZE);
+    int order_len = AlkatrazScreenOrder(spec->descriptors, spec->windows, order, ZX_SCREEN_SIZE);
     if (order_len <= 0)
         return NULL;
 
@@ -104,10 +75,11 @@ uint8_t *DecodeAlkatrazLoadingScreen(uint8_t *image, size_t length,
        same scrambled sequence the loader used. */
     ZXSetDrawOrder(order, order_len);
 
-    size_t block_len = length;
-    uint8_t *block = GetTZXBlock(block_index, image, &block_len);
+    size_t block_len = 0;
+    uint8_t *block = GetTZXBlock(spec->block, image, length, &block_len);
     if (block == NULL)
         return NULL;
+    int offset = spec->offset;
     if (block_len < (size_t)(offset + order_len)) {
         free(block);
         return NULL;
@@ -115,12 +87,12 @@ uint8_t *DecodeAlkatrazLoadingScreen(uint8_t *image, size_t length,
 
     uint8_t *screen = MemAlloc(ZX_SCREEN_SIZE);
     memset(screen, 0x00, ZX_BITMAP_SIZE);                 /* black bitmap   */
-    memset(screen + ZX_BITMAP_SIZE, attr_fill,
+    memset(screen + ZX_BITMAP_SIZE, spec->attr_fill,
         ZX_SCREEN_SIZE - ZX_BITMAP_SIZE);                 /* attribute fill */
 
     /* key is the loader's rolling XOR key (its LOACON), advancing by
        key_step (the loader's ADD2) after each decoded byte. */
-    uint8_t key = key_seed;
+    uint8_t key = spec->key_seed;
     for (int i = 0; i < order_len; i++) {
         uint16_t addr = order[i];
         uint8_t encrypted = block[offset + i];
@@ -128,7 +100,7 @@ uint8_t *DecodeAlkatrazLoadingScreen(uint8_t *image, size_t length,
            maps to the start of our SCREEN$ buffer. */
         screen[addr - ZX_RAM_BASE] =
             encrypted ^ key ^ 1 ^ ((addr >> 8) & 0xff) ^ (addr & 0xff);
-        key += key_step;
+        key += spec->key_step;
     }
 
     free(block);
@@ -137,10 +109,8 @@ uint8_t *DecodeAlkatrazLoadingScreen(uint8_t *image, size_t length,
 
 void DrawZXTitleImage(void)
 {
-#ifdef SPATTERLIGHT
-    if (!gli_enable_graphics)
+    if (!TAYLOR_GRAPHICS_ENABLED)
         return;
-#endif
     if (!ZXLoadingScreen)
         return;
 
@@ -192,12 +162,10 @@ void DrawZXTitleImage(void)
     }
 
     /* Reveal the picture slowly (in the loader's draw order, when one was
-       captured) when the slow-draw setting is on; otherwise paint it at once.
+       captured) when the slow-draw setting (or -g) is on and delays are
+       not off. Otherwise paint it at once.
        taylor uses the brighter ZXOPT palette (pal[]) and centres vertically. */
-    int slow = 1;
-#ifdef SPATTERLIGHT
-    slow = gli_slowdraw && !gli_determinism;
-#endif
+    int slow = gli_slowdraw && !(Options & NO_DELAYS);
     ZXTitle title = { Graphics, pal, 2, 0, 0, 0 };
     ZXTitleShow(&title, ZXLoadingScreen, keywin, slow,
         AlkatrazDrawOrderLen > 0 ? AlkatrazDrawOrder : NULL, AlkatrazDrawOrderLen);

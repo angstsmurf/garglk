@@ -13,6 +13,7 @@
 #include <stdio.h>
 
 #include "glk.h"
+#include "gamedefs.h"
 #include "gameload.h"
 #include "player.h"
 #include "ui.h"
@@ -33,13 +34,9 @@ void WriteToRoomDescriptionStream(const char *fmt, ...)
     if (room_description_stream == NULL)
         return;
     va_list ap;
-    char msg[2048];
-
     va_start(ap, fmt);
-    vsnprintf(msg, sizeof msg, fmt, ap);
+    PrintToStreamV(room_description_stream, fmt, ap);
     va_end(ap);
-
-    glk_put_string_stream(room_description_stream, msg);
 }
 
 /* Emit a single character, applying auto-capitalization if set. */
@@ -257,14 +254,17 @@ static void Q3PrintChar(uint8_t c)
    are the character; the high bit marks the end of the token. */
 static void PrintToken(unsigned char n)
 {
-    /* Blizzard Pass: token 0x2d in room 49 should render as a single hyphen
-       instead of its usual expansion. */
-    if (CurrentGame == BLIZZARD_PASS && MyLoc == 49 && n == 0x2d) {
+    /* Blizzard Pass: the long room descriptions are plain characters, and
+       the one byte among them that is not its own token is the hyphen of
+       "rough-hewn" in room 49. */
+    if (CurrentGame == BLIZZARD_PASS && MyLoc == BP_ROOM_CAVERN_WEST_END && n == BP_TOKEN_YOUR) {
         OutChar('-');
         return;
     }
     unsigned char *p = TokenText(n);
     unsigned char c;
+    if (p >= EndOfData)
+        return;
     do {
         c = *p++;
         if (Version == QUESTPROBE3_TYPE)
@@ -348,6 +348,9 @@ static void PrintTextRebelPlanet(unsigned char *stream, int text_index)
     while (stream < EndOfData) {
         if (token == NULL)
             token = TokenText(*stream++);
+        /* A token table that the file ends in the middle of */
+        if (token == NULL || token >= EndOfData)
+            return;
         /* Mask off the high "last-byte" marker to get the character. */
         unsigned char c = *token & TOKEN_BYTE_MASK;
         if (c == MSG_END_SPACE || c == MSG_END) {
@@ -444,7 +447,7 @@ void PrintObject(unsigned char object_index)
        but there is no way to unlock it and you can just walk
        through it anyway. This seems a bit unfair, so we change its
        description to just "door" here. */
-    if (BaseGame == TEMPLE_OF_TERROR && object_index == 41) {
+    if (BaseGame == TEMPLE_OF_TERROR && object_index == TOT_OBJ_LOCKED_DOOR) {
         OutString("door.");
         return;
     }
@@ -455,8 +458,9 @@ void PrintObject(unsigned char object_index)
 }
 
 /* Blizzard Pass: the long room descriptions of the text-only mode, and
-   how many rooms have one. */
-#define BLIZZARD_LONG_ROOM_TEXT 0x18000
+   how many rooms have one. They are at the start of RAM page 6, which is the
+   seventh page of the 128K image (pages 5, 2, 0, 1, 3, 4, 6, 7). */
+#define BLIZZARD_LONG_ROOM_TEXT (6 * 0x4000)
 #define BLIZZARD_LONG_ROOMS 102
 
 void PrintRoom(unsigned char room_index)

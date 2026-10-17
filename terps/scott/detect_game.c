@@ -22,6 +22,7 @@
 
 #include "game_specific.h"
 #include "gremlins.h"
+#include "hulk.h"
 #include "robin_of_sherwood.h"
 #include "seas_of_blood.h"
 
@@ -34,11 +35,10 @@
 
 #include "parser.h"
 
-/* Base address of the ZX Spectrum's writable RAM. ROM occupies
-   0x0000-0x3FFF; RAM starts at 0x4000, which is where loaded programs
-   live. Used to translate Z80 addresses stored in saved .z80 snapshots
-   to offsets into our in-memory file buffer. */
-#define ZX_RAM_BASE 0x4000
+/* ZX_RAM_BASE (0x4000, from decompressz80.h) is where the RAM of the ZX
+   Spectrum begins and where loaded programs live. Used to translate Z80
+   addresses stored in saved .z80 snapshots to offsets into our in-memory
+   file buffer. */
 
 /* Number of 16-bit words in a game file header */
 #define HEADER_WORDS 15
@@ -408,7 +408,9 @@ static void LoadVectorData(const GameInfo *info, uint8_t *ptr)
     else if (SeekIfNeeded(info->start_of_image_data, &offset, &ptr) == 0)
         return;
 
-    LineImages = MemAlloc(info->number_of_rooms * sizeof(line_image));
+    /* Zeroed, so that the images after a cut-off one are empty rather
+       than garbage. */
+    LineImages = MemCalloc(info->number_of_rooms * sizeof(line_image));
     uint8_t byte = *(ptr++);
 
     for (int ct = 0; ct < info->number_of_rooms; ct++) {
@@ -740,16 +742,18 @@ static int ReadMessages(uint8_t **ptr, int compressed)
    ParseItemSlashAutoGet()). Upper-cases the word after its first letter. */
 static void ParseItemDotAutoGet(int index)
 {
-    Items[index].AutoGet = strchr(Items[index].Text, '.');
-    if (Items[index].AutoGet == NULL)
+    char *word = strchr(Items[index].Text, '.');
+    Items[index].AutoGet = NULL;
+    if (word == NULL)
         return;
-    *Items[index].AutoGet++ = 0;
-    Items[index].AutoGet++;
-    char *t = strchr(Items[index].AutoGet, '.');
+    *word++ = 0;
+    word++;
+    char *t = strchr(word, '.');
     if (t != NULL)
         *t = 0;
     for (int i = 1; i < GameHeader.WordLength; i++)
-        Items[index].AutoGet[i] = toupper(Items[index].AutoGet[i]);
+        word[i] = toupper(word[i]);
+    Items[index].AutoGet = word;
 }
 
 /* Read the item descriptions of TryLoading(): compressed text, or
@@ -912,8 +916,14 @@ GameIDType TryLoading(uint8_t *data, size_t datasize, const GameInfo *info, int 
     file_length = datasize;
 
     /* The UK versions of Hulk uses the Mak Jukic binary database format */
-    if (info->gameID == HULK || info->gameID == HULK_C64)
-        return LoadBinaryDatabase(entire_file, file_length, *info, dict_start);
+    if (info->gameID == HULK || info->gameID == HULK_C64) {
+        GameIDType result = LoadBinaryDatabase(entire_file, file_length, *info, dict_start);
+        if (result != UNKNOWN_GAME) {
+            HulkReadCloseups();
+            AddExtraCloseups(info->gameID);
+        }
+        return result;
+    }
 
     if (info->type == OLD_STYLE)
         return TryLoadingOld(info, dict_start);
@@ -1144,7 +1154,7 @@ static uint8_t *DecompressParsec(uint8_t *start, uint8_t *end, uint8_t *dataptr)
    by every game on a tape, so they live in AlkatrazTape. */
 typedef struct {
     const char *title;
-    int tzx_block;     /* GetTZXBlock index of this game's encrypted block */
+    int tzx_block;     /* number of the data block the game is encrypted in */
     uint8_t loacon;    /* initial rolling key */
     uint8_t add1;      /* key-evolution constants */
     uint8_t add2;
@@ -1168,10 +1178,10 @@ typedef struct {
    the address each game's GameInfo expects (Pirate 0x869A, Voodoo 0x8752,
    Strange Odyssey 0x899A, Buckaroo 0x8C54). */
 static const AlkatrazGame scoops_games[] = {
-    { "Pirate Adventure",  4, 0xad, 0xfd, 0xff },
-    { "Voodoo Castle",     8, 0x1e, 0xfe, 0xbe },
-    { "Strange Odyssey",  12, 0x5a, 0x9c, 0xdc },
-    { "Buckaroo Banzai",  16, 0xdb, 0xb3, 0x21 },
+    { "Pirate Adventure",  3, 0xad, 0xfd, 0xff },
+    { "Voodoo Castle",     7, 0x1e, 0xfe, 0xbe },
+    { "Strange Odyssey",  11, 0x5a, 0x9c, 0xdc },
+    { "Buckaroo Banzai",  15, 0xdb, 0xb3, 0x21 },
 };
 
 static const AlkatrazTape alkatraz_tapes[] = {
@@ -1216,22 +1226,24 @@ static int DeAlkatrazTape(void)
     }
     const AlkatrazGame *game = &tape->games[choice];
 
-    size_t blocklen = file_length;
-    uint8_t *block = GetTZXBlock(game->tzx_block, entire_file, &blocklen);
+    size_t blocklen = 0;
+    uint8_t *block = GetTZXBlock(game->tzx_block, entire_file, file_length, &blocklen);
     if (block == NULL)
         return 0;
-    if (tape->source_offset + tape->size > blocklen) {
-        free(block);
+
+    uint8_t loacon = game->loacon;
+    const AlkatrazKey schedule = { game->add1, game->add2, 0, 0 };
+    uint8_t *mem = ZXNewMemory();
+    int ok = mem != NULL && DeAlkatraz(block, blocklen, tape->source_offset,
+        mem, tape->target, tape->size, &loacon, &schedule);
+    free(block);
+    if (!ok) {
+        free(mem);
         return 0;
     }
 
-    uint8_t loacon = game->loacon;
-    uint8_t *mem = DeAlkatraz(block, NULL, tape->source_offset, tape->target,
-        tape->size, &loacon, game->add1, game->add2, 0);
-    free(block);
-
-    uint8_t *image = MemAlloc(0xc000);
-    memcpy(image, mem + ZX_RAM_BASE, 0xc000);
+    uint8_t *image = MemAlloc(ZX_MEMORY_SIZE - ZX_RAM_BASE);
+    memcpy(image, mem + ZX_RAM_BASE, ZX_MEMORY_SIZE - ZX_RAM_BASE);
     free(mem);
 
     free(entire_file);
@@ -1354,9 +1366,10 @@ static GameIDType DetectZXSpectrum(void)
 static void SetUpGameSpecifics(GameIDType detectedGame)
 {
     /* Copy ZX Spectrum style system messages as a base, then apply
-       game-specific overrides below */
-    for (int i = 6; i < MAX_SYSMESS && sysdict_zx[i] != NULL; i++) {
-        sys[i] = (char *)sysdict_zx[i];
+       game-specific overrides below. The direction words before
+       PLAY_AGAIN are copied for the Hulk only, below. */
+    for (int i = PLAY_AGAIN; i < MAX_SYSMESS && sysdict_zx[i] != NULL; i++) {
+        sys[i] = sysdict_zx[i];
     }
 
     /* Game-specific post-load setup: load extra data (Robin of Sherwood
@@ -1375,10 +1388,11 @@ static void SetUpGameSpecifics(GameIDType detectedGame)
     case SEAS_OF_BLOOD_C64:
         LoadExtraSeasOfBloodData(1);
         break;
-    case CLAYMORGUE:
-        MapSysRange(OK, RESUME_A_SAVED_GAME, 6);
-        MapSysRange(PLAY_AGAIN, ON_A_SCALE_THAT_RATES, 2);
+    case CLAYMORGUE: {
+        int src = MapSysRange(PLAY_AGAIN, ON_A_SCALE_THAT_RATES, 2);
+        MapSysRange(OK, RESUME_A_SAVED_GAME, src);
         break;
+    }
     case SECRET_MISSION:
     case SECRET_MISSION_C64:
         Items[3].Image = 23;
@@ -1389,11 +1403,12 @@ static void SetUpGameSpecifics(GameIDType detectedGame)
             break;
         }
         // fallthrough
-    case ADVENTURELAND:
-        MapSysRange(PLAY_AGAIN, ON_A_SCALE_THAT_RATES, 2);
-        MapSysRange(OK, YOU_HAVENT_GOT_IT, 6);
-        MapSysRange(YOU_DONT_SEE_IT, RESUME_A_SAVED_GAME, 13);
+    case ADVENTURELAND: {
+        int src = MapSysRange(PLAY_AGAIN, ON_A_SCALE_THAT_RATES, 2);
+        src = MapSysRange(OK, YOU_HAVENT_GOT_IT, src);
+        MapSysRange(YOU_DONT_SEE_IT, RESUME_A_SAVED_GAME, src);
         break;
+    }
     case ADVENTURELAND_C64:
         Adventureland64Sysmess();
         break;
@@ -1440,16 +1455,16 @@ static void SetUpGameSpecifics(GameIDType detectedGame)
         break;
     case HULK_C64:
     case HULK:
-        for (int i = 0; i < 6; i++) {
-            sys[i] = (char *)sysdict_zx[i];
+        for (int i = NORTH; i < PLAY_AGAIN; i++) {
+            sys[i] = sysdict_zx[i];
         }
         break;
     default:
         if (!(Game->subtype & C64)) {
             if (Game->subtype & MYSTERIOUS) {
-                MapSysRange(PLAY_AGAIN, YOU_HAVENT_GOT_IT, 2);
-                MapSysRange(YOU_DONT_SEE_IT, WHAT_NOW, 15);
-                MapSysRange(LIGHT_HAS_RUN_OUT, RESUME_A_SAVED_GAME, 31);
+                int src = MapSysRange(PLAY_AGAIN, YOU_HAVENT_GOT_IT, 2);
+                src = MapSysRange(YOU_DONT_SEE_IT, WHAT_NOW, src);
+                MapSysRange(LIGHT_HAS_RUN_OUT, RESUME_A_SAVED_GAME, src);
                 sys[ITEM_DELIMITER] = " - ";
                 sys[MESSAGE_DELIMITER] = "\n";
                 sys[YOU_SEE] = "\nThings I can see:\n";
@@ -1564,6 +1579,7 @@ GameIDType DetectGame(const char *file_name)
 
     if (IsMysterious()) {
         Options = Options | SCOTTLIGHT | PREHISTORIC_LAMP;
+        ImageWidth = 255;
         ImageHeight = 95;
     }
 

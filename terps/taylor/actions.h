@@ -11,18 +11,18 @@
 #include "taylor.h"
 
 void RunStatusTable(void);
-void RunCommandTable(void);
+void RunEventTable(void);
 void QP3DrawExtraImages(void);
 void Goto(unsigned char destination);
 void Okay(void);
 
 #ifdef DEBUG
 void InitActionDebugging(void);
+#else
+#define InitActionDebugging()
 #endif
 
 extern int ActionsExecuted;
-extern int FoundVerb;
-extern int FoundNoun;
 extern int RecursionGuard;
 
 #endif /* actions_h */

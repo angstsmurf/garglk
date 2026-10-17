@@ -93,24 +93,27 @@ static void DrawUSTitle(void)
     DrawImageOrVector();
 }
 
+/* The window that takes the key press on a title screen. OpenTitleWindows()
+   only opens Bottom when the graphics window can't take key input, so
+   Bottom comes first. */
+static winid_t TitleKeyWindow(void)
+{
+    return Bottom != NULL ? Bottom : Graphics;
+}
+
 static void WaitForKeyOnTitleScreen(void) {
 
-    if (Graphics != NULL) {
-        glk_request_char_event(Graphics);
-    } else if (Bottom != NULL) {
-        glk_request_char_event(Bottom);
-    } else {
+    winid_t keywin = TitleKeyWindow();
+    if (keywin == NULL)
         return;
-    }
+    glk_request_char_event(keywin);
 
     event_t ev;
     do {
         glk_select(&ev);
         if (ev.type == evtype_Arrange) {
-#ifdef SPATTERLIGHT
-            if (!gli_enable_graphics)
+            if (!GraphicsEnabled())
                 break;
-#endif
             int stored_slowdraw = gli_slowdraw;
             gli_slowdraw = 0;
             DrawUSTitle();
@@ -123,41 +126,10 @@ static void WaitForKeyOnTitleScreen(void) {
     } while (ev.type != evtype_CharInput);
 }
 
-/* The loading screen is, in practice, always the first standard-length
-   (6912-byte) data block on the tape. ExtractTapePayloads() returns only
-   the 0xFF data blocks (the 0x00 header blocks are skipped) with the
-   offset and length of each, so we just return the first that is exactly
-   one SCREEN$ in size. */
-uint8_t *FindTapeLoadingScreen(const uint8_t *raw, size_t raw_len, int is_tzx)
-{
-#define MAX_TAPE_BLOCKS 64
-    size_t out_len = 0;
-    size_t blk_off[MAX_TAPE_BLOCKS], blk_len[MAX_TAPE_BLOCKS];
-    int n_blk = 0;
-
-    uint8_t *payloads = ExtractTapePayloads(raw, raw_len, is_tzx, &out_len,
-        blk_off, blk_len, &n_blk, MAX_TAPE_BLOCKS);
-    if (!payloads)
-        return NULL;
-
-    uint8_t *screen = NULL;
-    for (int i = 0; i < n_blk; i++) {
-        if (blk_len[i] == ZX_SCREEN_SIZE) {
-            screen = MemAlloc(ZX_SCREEN_SIZE);
-            memcpy(screen, payloads + blk_off[i], ZX_SCREEN_SIZE);
-            break;
-        }
-    }
-    free(payloads);
-    return screen;
-}
-
 void DrawZXTitleImage(void)
 {
-#ifdef SPATTERLIGHT
-    if (!gli_enable_graphics)
+    if (!GraphicsEnabled())
         return;
-#endif
     if (!ZXLoadingScreen)
         return;
 
@@ -180,7 +152,7 @@ void DrawZXTitleImage(void)
            games use ordinary loaders. The picture sits a third of the way
            down the window. */
         ZXTitle title = { Graphics, pal, 3, 0, 0, 0 };
-        ZXTitleShow(&title, ZXLoadingScreen, Graphics, gli_slowdraw, NULL, 0);
+        ZXTitleShow(&title, ZXLoadingScreen, TitleKeyWindow(), gli_slowdraw, NULL, 0);
     }
 
     CloseTitleWindows();
@@ -305,10 +277,8 @@ void DrawTitleImageScott(void)
 {
     int storedwidth = ImageWidth;
     int storedheight = ImageHeight;
-#ifdef SPATTERLIGHT
-    if (!gli_enable_graphics)
+    if (!GraphicsEnabled())
         return;
-#endif
     const glui32 no_color = (glui32)-1;
     glui32 background_color = no_color;
     OpenTitleWindows(&background_color);
@@ -345,13 +315,15 @@ void PrintTitleScreenBuffer(void)
 {
     glk_stream_set_current(glk_window_get_stream(Bottom));
     glk_set_style(style_User1);
-    glk_window_clear(Graphics);
+    if (Graphics)
+        glk_window_clear(Graphics);
     Output(title_screen);
     free(title_screen);
     title_screen = NULL;
     glk_set_style(style_Normal);
     HitEnter();
-    glk_window_clear(Graphics);
+    if (Graphics)
+        glk_window_clear(Graphics);
 }
 
 void PrintTitleScreenGrid(void)

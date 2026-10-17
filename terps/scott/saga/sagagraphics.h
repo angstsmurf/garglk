@@ -44,7 +44,7 @@ typedef struct {
 
 extern int pixel_size;
 extern int x_offset, y_offset;
-extern int right_margin, left_margin;
+extern int left_margin;
 extern glui32 pal[16];
 
 void SetColor(int32_t index, glui32 color);
@@ -52,6 +52,10 @@ void SetColor(int32_t index, glui32 color);
 void PutPixel(glsi32 x, glsi32 y, int32_t color);
 void PutDoublePixel(glsi32 x, glsi32 y, int32_t color);
 void PutPixelWithWidth(glsi32 xpos, glsi32 ypos, int32_t color, int pixel_width);
+/* Bracket a bitmap picture that is drawn in one go, so that its pixels
+   reach the window as runs rather than one at a time. */
+void StartPixelRuns(void);
+void FlushPixelRuns(void);
 void RectFill(int32_t x, int32_t y, int32_t width, int32_t height,
               int32_t color);
 uint8_t *FindImageFile(const char *shortname, size_t *datasize);

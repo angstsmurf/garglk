@@ -19,6 +19,7 @@
 #include "c64diskimage.h"
 #include "c64unpack.h"
 #include "detect_game.h"
+#include "game_specific.h"
 #include "sagadraw.h"
 #include "sagagraphics.h"
 #include "c64a8scott.h"
@@ -194,48 +195,6 @@ static const c64rec c64_registry[] = {
 
 static GameIDType ProcessC64(uint8_t **sf, size_t *extent, c64rec entry);
 
-/* Extract the largest file from a D64 disk image into a newly allocated buffer.
-   Returns the file data (caller must free) and sets *newlength, or returns
-   NULL if the disk image couldn't be parsed. */
-static uint8_t *get_largest_file(uint8_t *data, int length, int *newlength)
-{
-    uint8_t *file = NULL;
-    *newlength = 0;
-    DiskImage *d64 = di_create_from_data(data, length);
-    if (d64) {
-        RawDirEntry *largest = di_find_largest_file_entry(d64);
-        if (largest) {
-            ImageFile *c64file = di_open(d64, largest->rawname, largest->type, "rb");
-            if (c64file) {
-                size_t filelength;
-                file = di_read_file(c64file, &filelength);
-                *newlength = (int)filelength;
-            }
-        }
-        free(d64);
-    }
-    return file;
-}
-
-/* Extract the file that starts at a given track and sector of a D64 disk
-   image, for a program that the directory of the disk does not list. */
-static uint8_t *get_file_at_ts(uint8_t *data, int length, int *newlength, int track, int sector)
-{
-    uint8_t *file = NULL;
-    *newlength = 0;
-    DiskImage *d64 = di_create_from_data(data, length);
-    if (d64) {
-        ImageFile *c64file = di_create_file_from_ts(d64, track, sector);
-        if (c64file) {
-            size_t filelength;
-            file = di_read_file(c64file, &filelength);
-            *newlength = (int)filelength;
-        }
-        free(d64);
-    }
-    return file;
-}
-
 /* Savage Island stores picture data in separate files on the D64 image.
    These buffers hold the extracted picture files so they can be appended
    to the main game data after decompression. */
@@ -305,7 +264,7 @@ static void appendSIfiles(uint8_t **sf, size_t *extent)
         free(save_island_appendix_2);
     }
     *extent = offset + save_island_appendix_1_length + save_island_appendix_2_length;
-    *sf = malloc(*extent);
+    *sf = MemAlloc(*extent);
     memcpy(*sf, megabuf, *extent);
 }
 
@@ -371,11 +330,11 @@ static GameIDType adventure_pack_menu(uint8_t **sf, size_t *extent)
         "Mission Impossible", "Voodoo Castle", "The Count", "Strange Odyssey",
         "Fun House", "Pyramid of Doom", "Ghost Town", "Savage Island",
         "Savage Island Part 2", "The Golden Voyage" };
-    int result = SelectGameFromMenu(
+    int choice = SelectGameFromMenu(
         "This disk image contains 12 games. Select one.", titles, 12) + 1;
 
     char filename[100];
-    snprintf(filename, 100, "ADV%d.OBJ", result);
+    snprintf(filename, 100, "ADV%d.OBJ", choice);
 
     size_t length;
     uint8_t *file = di_get_file_named(*sf, *extent, &length, filename);
@@ -430,12 +389,10 @@ static void LoadC64USImages(uint8_t *data, size_t length)
     DiskImage *d64 = di_create_from_data(data, length);
     if (d64) {
         char **filenames = di_get_all_file_names(d64, &numfiles);
-        unsigned char rawname[1024];
         if (filenames) {
+            /* Keep the names of the pictures, at the front of the array */
             int imgindex = 0;
-            if (numfiles > 1024)
-                numfiles = 1024;
-            char *imagefiles[1024];
+            char **imagefiles = filenames;
             for (int i = 0; i < numfiles; i++) {
                 if (IsSagaImage(filenames[i])) {
                     imagefiles[imgindex++] = filenames[i];
@@ -443,17 +400,16 @@ static void LoadC64USImages(uint8_t *data, size_t length)
                     free(filenames[i]);
                 }
             }
-            free(filenames);
 
             if (imgindex) {
                 USImages = NewImage();
                 USImage *image = USImages;
                 for (int i = 0; i < imgindex; i++) {
                     const char *shortname = imagefiles[i];
-                    di_rawname_from_name(rawname, shortname);
-                    ImageFile *c64file = di_open(d64, rawname, 0xc2, "rb");
-                    if (c64file) {
-                        image->imagedata = di_read_file(c64file, &image->datasize);
+                    /* The index and usage are read from positions 3 to 6 */
+                    if (strlen(shortname) >= 6)
+                        image->imagedata = di_read_file_named(d64, shortname, &image->datasize);
+                    if (image->imagedata) {
                         image->systype = SYS_C64;
                         /* Parse 3-digit image index from filename positions 3–5 */
                         image->index = shortname[5] - '0' + (shortname[4] - '0') * 10 + (shortname[3] - '0') * 100;
@@ -476,8 +432,73 @@ static void LoadC64USImages(uint8_t *data, size_t length)
                     USImages = NULL;
                 }
             }
+            free(filenames);
         }
-        free(d64);
+        di_free(d64);
+    }
+}
+
+/* The interpreter of the US Hulk is not a file of the disk but a chain of
+   sectors that are stored back to front and exclusive-ored with $55. This
+   reads the 254 bytes of the one at offset and gives the offset of the one
+   that follows it, or 0 if there is none. */
+static size_t ReadHiddenSector(const uint8_t *disk, size_t length, size_t offset, uint8_t *out)
+{
+    static const uint8_t sectors[] = { 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
+        19, 19, 19, 19, 19, 19, 19, 18, 18, 18, 18, 18, 18, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17 };
+    const uint8_t *sector = disk + offset;
+
+    for (int i = 0; i < 254; i++)
+        out[i] = sector[253 - i] ^ 0x55;
+
+    int track = sector[255] ^ 0x55, next = sector[254] ^ 0x55;
+    if (track < 1 || track > (int)sizeof sectors || next >= sectors[track - 1])
+        return 0;
+    size_t result = 0;
+    for (int i = 1; i < track; i++)
+        result += sectors[i - 1];
+    result = (result + next) * 256;
+    return (result + 256 <= length) ? result : 0;
+}
+
+/* That interpreter has the same table of close-ups as the Apple II one (see
+   SetA2Closeups() in apple2detect.c), just before its "<HIT RETURN>" prompt
+   in inverse video. Its picture slots are the numbers of the room picture
+   files. The pictures must have been read. */
+static void SetC64USCloseups(const uint8_t *disk, size_t length)
+{
+    static const uint8_t prompt[] = { 0x0d, 0xbc, 0xc8, 0xc9, 0xd4, 0xa0, 0xd2, 0xc5, 0xd4, 0xd5, 0xd2, 0xce, 0xbe, 0x0d };
+    enum { ENTRIES = 16, TABLE = 1 + 3 * ENTRIES, DATA = 254 };
+    uint8_t buf[2 * DATA];
+
+    for (size_t offset = 0; offset + 256 <= length; offset += 256) {
+        size_t size = DATA;
+        size_t next = ReadHiddenSector(disk, length, offset, buf);
+        if (next != 0) {
+            ReadHiddenSector(disk, length, next, buf + DATA);
+            size += DATA;
+        }
+        /* A prompt that starts in the second sector is found again when
+           that one comes first, unless the table is split between them. */
+        for (size_t i = TABLE; i + sizeof prompt <= size && i < DATA + TABLE; i++) {
+            if (memcmp(buf + i, prompt, sizeof prompt) != 0)
+                continue;
+            const uint8_t *table = buf + i - TABLE;
+            const uint8_t *items = table + 1, *slots = items + ENTRIES, *nouns = slots + ENTRIES;
+            SetCloseupVerb(table[0], 1);
+            for (int j = 0; j < ENTRIES; j++) {
+                if (nouns[j] == 0)
+                    continue;
+                for (USImage *image = USImages; image != NULL; image = image->next) {
+                    if (image->usage == IMG_ROOM && image->index == slots[j]) {
+                        AddCloseup(items[j], nouns[j], slots[j]);
+                        break;
+                    }
+                }
+            }
+            AddExtraCloseups(CurrentGame);
+            return;
+        }
     }
 }
 
@@ -534,15 +555,15 @@ static size_t writeToFile(const char *name, uint8_t *data, size_t size)
    Returns 0 on failure. */
 static int ExtractD64Game(uint8_t **sf, size_t *extent, const c64rec *rec)
 {
-    int newlength;
+    size_t newlength;
     uint8_t *largest_file;
     /* The Slam compilation lists a copy of Claymorgue that ends 2.8 KB
        short, C1/SLAM. A complete, packed one is still on the disk, at
        track 22, sector 4, with no directory entry. */
     if (rec->chk == 0xf8c2)
-        largest_file = get_file_at_ts(*sf, *extent, &newlength, 22, 4);
+        largest_file = di_get_file_at_ts(*sf, *extent, &newlength, 22, 4);
     else
-        largest_file = get_largest_file(*sf, *extent, &newlength);
+        largest_file = di_get_largest_file(*sf, *extent, &newlength);
     uint8_t *appendix = NULL;
     size_t appendixlen = 0;
 
@@ -569,7 +590,7 @@ static int ExtractD64Game(uint8_t **sf, size_t *extent, const c64rec *rec)
        file. A negative parameter means that the two overlap. */
     long appendpos = (long)newlength + rec->parameter;
     size_t buflen = newlength + appendixlen;
-    if (appendix != NULL && appendpos > newlength)
+    if (appendix != NULL && appendpos > (long)newlength)
         buflen = appendpos + appendixlen;
     if (buflen == 0 || buflen > MAX_LENGTH || (appendix != NULL && appendpos < 0)) {
         free(largest_file);
@@ -696,6 +717,7 @@ GameIDType DetectC64(uint8_t **sf, size_t *extent, const char *filename)
                 if (result) {
                     CurrentSys = SYS_C64;
                     LoadC64USImages(*sf, *extent);
+                    SetC64USCloseups(*sf, *extent);
                     free(*sf);
                     *sf = MemAlloc(newlength);
                     memcpy(*sf, database_file, newlength);

@@ -156,7 +156,7 @@ static VectorOpList write_ops = VECTOR_OPLIST(byte_to_write);
 // set_color / set_draw_position now live in common_sagadraw/gm_vector.c.
 
 static inline bool is_valid_screen_offset(uint16_t offset) {
-    return offset <= MAX_SCREEN_ADDR;
+    return offset <= GM_MAX_SCREEN_ADDR;
 }
 
 // MARK: SLOW DRAW
@@ -494,8 +494,8 @@ static const uint8_t opcode_arguments[16] = {
     [A2_OP_PAINT] = 2,
 };
 
-static bool doImageOp(uint8_t **outptr, const uint8_t *end, a2_vector_ctx *ctx) {
-    uint8_t *ptr = *outptr;
+static bool doImageOp(const uint8_t **outptr, const uint8_t *end, a2_vector_ctx *ctx) {
+    const uint8_t *ptr = *outptr;
     uint8_t opcode;
     uint16_t a, b;
 
@@ -511,7 +511,7 @@ static bool doImageOp(uint8_t **outptr, const uint8_t *end, a2_vector_ctx *ctx) 
 
     // A truncated final op ends the image
     if (ptr + opcode_arguments[opcode] > end) {
-        *outptr = (uint8_t *)end;
+        *outptr = end;
         return true;
     }
 
@@ -569,16 +569,20 @@ static bool doImageOp(uint8_t **outptr, const uint8_t *end, a2_vector_ctx *ctx) 
 }
 
 static void white_background(void) {
-    // Draw a white background
-    // with a black line to the left
-    // to match the artifact renderer
+    // Draw a white background with a black line to the left, to match
+    // the artifact renderer: an all-0xff line is black at dot 0 only.
     SetColor(0, 0);
     SetColor(1, 0xffffff);
-    RectFill(0, 0, 2, ImageHeight, 0);
-    RectFill(2, 0, ImageWidth - 2, ImageHeight, 1);
+    RectFill(0, 0, 1, ImageHeight, 0);
+    RectFill(1, 0, ImageWidth - 1, ImageHeight, 1);
 }
 
-static int write_pixel(const byte_to_write *towrite, size_t current_op_index) {
+static VectorStepResult write_pixel(const void *op, size_t current_op_index) {
+    const byte_to_write *towrite = op;
+    if (towrite->fill_bg) {
+        white_background();
+        return VECTOR_STEP_NEXT;
+    }
     slow_vector_screenmem[towrite->offset] = towrite->value;
     DrawSingleApple2ImageByte(slow_vector_screenmem, towrite->offset);
     if (current_op_index + 1 < write_ops.total) {
@@ -590,44 +594,16 @@ static int write_pixel(const byte_to_write *towrite, size_t current_op_index) {
         // same-pattern fills snap in within a single tick instead of revealing
         // gradually like the rest of the picture.)
         if (next_byte->offset >= towrite->offset - 1 && next_byte->offset <= towrite->offset + 1) {
-            return 1;
+            return VECTOR_STEP_EXTEND;
         }
     }
-    return 0;
+    return VECTOR_STEP_NEXT;
 }
 
 void DrawSomeApple2VectorBytes(int from_start)
 {
-    if (!gli_slowdraw) {
-        DrawApple2ImageFromVideoMem();
-        write_ops.current = write_ops.total;
-    } else {
-        VectorState = DRAWING_VECTOR_IMAGE;
-        if (from_start) {
-            write_ops.current = 0;
-            VectorOpListShrink(&write_ops);
-        }
-        size_t i = write_ops.current;
-
-        /* keep_going extends the chunk past the normal cap when the next op
-         * writes an adjacent byte — this avoids visible seams in runs of
-         * neighbouring writes. */
-        int keep_going = 0;
-        size_t chunk_end = i + APPLE2_VECTOR_BYTES_PER_TICK;
-
-        for (; i < write_ops.total && (i < chunk_end || keep_going); i++) {
-            const byte_to_write *towrite = VectorOpAt(&write_ops, i);
-            if (towrite->fill_bg) {
-                white_background();
-            } else {
-                keep_going = write_pixel(towrite, i);
-            }
-        }
-
-        write_ops.current = i;
-    }
-
-    VectorOpListFinishIfDone(&write_ops);
+    VectorOpListPlayChunk(&write_ops, from_start, APPLE2_VECTOR_BYTES_PER_TICK,
+        write_pixel, DrawApple2ImageFromVideoMem);
 }
 
 int DrawingApple2Vector(void) {
@@ -640,7 +616,7 @@ int DrawApple2VectorImage(USImage *img) {
 
     a2_vector_ctx ctx = {};
 
-    uint8_t *vecdata = img->imagedata + 4;
+    const uint8_t *vecdata = img->imagedata + 4;
     int done = 0;
     if (screenmem == NULL) {
         screenmem = MemCalloc(A2_SCREEN_MEM_SIZE);

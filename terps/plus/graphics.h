@@ -19,7 +19,7 @@ extern winid_t Graphics;
 
 extern int pixel_size;
 extern int ImageWidth, ImageHeight;
-extern int x_offset, y_offset, right_margin;
+extern int x_offset, y_offset;
 extern int upside_down;
 
 /* Set CurrentSys and the native picture size of that system */
@@ -43,6 +43,7 @@ int DrawImageWithTypeAndNumber(char type, int index);
 void DrawOverlayImage(ImgType type, int index);
 void DrawObjectImages(int room, int location);
 char *ShortNameFromType(char type, int index);
+ImgType ImageTypeFromName(const char *name);
 int ImageNumberFromName(const char *name);
 void DrawBlack(void);
 void ShowApple2Screen(void);

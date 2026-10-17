@@ -21,6 +21,7 @@
 #include "animations.h"
 #include "c64decrunch.h"
 #include "extracommands.h"
+#include "gamedefs.h"
 #include "gameload.h"
 #include "graphics.h"
 #include "irmak.h"
@@ -52,7 +53,6 @@ int NoGraphics = 0;        /* Disable graphics display */
 char DelimiterChar = '_';  /* Word separator in dictionary entries */
 
 static int LastNoun = 0; /* Last noun for "IT" pronoun substitution */
-int LastVerb = 0;        /* Last verb for implicit verb carry-forward */
 static int GoVerb = 0;   /* Dictionary code for "GO" */
 
 GameInfo *Game = NULL;
@@ -76,11 +76,11 @@ unsigned char Worn(void)
 unsigned char NumObjects(void)
 {
     if (Version == QUESTPROBE3_TYPE)
-        return 49;
+        return Q3_NUM_OBJECTS;
 
     /* This removes one weird empty "You notice." in Kayleth */
     if (BaseGame == KAYLETH)
-        return 120;
+        return KAYLETH_NUM_OBJECTS;
 
     return Flag[6];
 }
@@ -88,11 +88,11 @@ unsigned char NumObjects(void)
 static int WaitFlag(void)
 {
     if (Version == QUESTPROBE3_TYPE)
-        return 5;
+        return Q3_WAIT_COUNTER_FLAG;
     else if (BaseGame != REBEL_PLANET && BaseGame != KAYLETH)
         return -1;
     else
-        return 7;
+        return WAIT_COUNTER_FLAG;
 }
 
 int CarryItem(void)
@@ -109,7 +109,7 @@ int CarryItem(void)
 
 int DarkFlag(void)
 {
-    return Version == QUESTPROBE3_TYPE ? 43 : 1;
+    return Version == QUESTPROBE3_TYPE ? Q3_DARK_FLAG : 1;
 }
 
 void DropItem(void)
@@ -126,15 +126,22 @@ void Put(unsigned char obj, unsigned char loc)
     ObjectLoc[obj] = loc;
 }
 
+/* Carried or worn. Questprobe 3 has nothing worn, and its Worn() of 0
+   is an ordinary location. */
+int HeldByPlayer(unsigned char obj)
+{
+    if (ObjectLoc[obj] == Carried())
+        return 1;
+    return Version != QUESTPROBE3_TYPE && ObjectLoc[obj] == Worn();
+}
+
 int Present(unsigned char obj)
 {
     if (obj >= NumObjects())
         return 0;
     unsigned char v = ObjectLoc[obj];
-    if (v == MyLoc || v == Worn() || v == Carried() ||
-        (Version == QUESTPROBE3_TYPE && v == OtherGuyInv && OtherGuyLoc == MyLoc))
-        return 1;
-    return 0;
+    return v == MyLoc || HeldByPlayer(obj)
+        || (Version == QUESTPROBE3_TYPE && v == OtherGuyInv && OtherGuyLoc == MyLoc);
 }
 
 /* Room 0 is the intro/title pseudo-room; Kayleth's room 91 is an
@@ -201,13 +208,13 @@ static void FileNotice(const char *text)
     OutFlush();
 }
 
-int LoadGame(void)
+LoadResult LoadGame(void)
 {
     frefid_t fileref = glk_fileref_create_by_prompt(fileusage_SavedGame,
         filemode_Read, 0);
     if (!fileref) {
         OutFlush();
-        return 0;
+        return LOAD_NO_FILE;
     }
 
     /*
@@ -220,10 +227,11 @@ int LoadGame(void)
     if (!stream) {
         glk_fileref_destroy(fileref);
         FileNotice("Unable to open file.\n");
-        return 0;
+        return LOAD_NO_FILE;
     }
 
     SavedState *state = SaveCurrentState();
+    LoadResult result;
 
     /* Restore saved game data. */
 
@@ -231,15 +239,17 @@ int LoadGame(void)
         || glk_get_buffer_stream(stream, (char *)ObjectLoc, sizeof(ObjectLoc)) != sizeof(ObjectLoc)
         || (size_t)GetGlkFileLength(stream) != sizeof(Flag) + sizeof(ObjectLoc)) {
         RecoverFromBadRestore(state);
+        result = LOAD_BAD_DATA;
     } else {
         glk_window_clear(Bottom);
         Look();
         free(state);
         InKaylethPreview = 0;
+        result = LOAD_OK;
     }
     glk_stream_close(stream, NULL);
     glk_fileref_destroy(fileref);
-    return 1;
+    return result;
 }
 
 /* Print the player's inventory: every object whose location matches the
@@ -255,7 +265,7 @@ void Inventory(void)
 
     int printed_any = 0;
     for (int i = 0; i < NumObjects(); i++) {
-        if (ObjectLoc[i] == Carried() || ObjectLoc[i] == Worn()) {
+        if (HeldByPlayer(i)) {
             printed_any = 1;
             PrintObject(i);
             if (ObjectLoc[i] == Worn()) {
@@ -367,6 +377,88 @@ static void QP3RedrawImages(void)
     StopTime = tempstop;
 }
 
+/* "Low" objects are part of the room description (e.g. "...a sword
+   lies here."). They're listed inline rather than after "You see:". */
+static void ListLowObjects(void)
+{
+    int printed_any = 0;
+
+    for (int i = 0; i < NumLowObjects; i++) {
+        if (ObjectLoc[i] == MyLoc) {
+            if (!printed_any) {
+                if (Version == QUESTPROBE3_TYPE) {
+                    OutReplace(0);
+                    SysMessage(YOU_SEE);
+                } else if (BaseGame == HEMAN || BaseGame == REBEL_PLANET) {
+                    OutChar(' ');
+                }
+                printed_any = 1;
+            }
+            PendSpace = 1;
+            PrintObject(i);
+        }
+    }
+    if (printed_any && !isalpha((unsigned char)LastChar))
+        OutReplace('.');
+}
+
+/* The objects after the low ones are listed under a "You see:" heading. */
+static void ListHighObjects(void)
+{
+    int printed_any = 0;
+
+    for (int i = NumLowObjects > 0 ? NumLowObjects : 0; i < NumObjects(); i++) {
+        if (ObjectLoc[i] == MyLoc) {
+            if (!printed_any) {
+                /* Only the text-only and hybrid games */
+                if (BaseGame == TEMPLE_OF_TERROR
+                    && CurrentGame != TEMPLE_OF_TERROR
+                    && CurrentGame != TEMPLE_OF_TERROR_64) {
+                    OutChar(' ');
+                }
+                SysMessage(YOU_SEE);
+                if (CurrentGame == BLIZZARD_PASS) {
+                    PendSpace = 0;
+                    OutString(":- ");
+                }
+                if (Version == REBEL_PLANET_TYPE)
+                    OutReplace(0);
+                printed_any = 1;
+            }
+            PrintObject(i);
+        }
+    }
+    if (printed_any)
+        OutReplace('.');
+    else
+        OutChar('.');
+}
+
+/* Draw the picture of the current room, if there is a graphics window. */
+static void DrawRoomPicture(void)
+{
+    if (MyLoc == 0 || NoGraphics || !TAYLOR_GRAPHICS_ENABLED || !Graphics)
+        return;
+
+    /* A resize-in-progress: reuse the buffered image rather than
+       re-running the room's drawing pipeline. */
+    if (Resizing) {
+        DrawBufferedPicture();
+        return;
+    }
+    if (Version == QUESTPROBE3_TYPE) {
+        QP3RedrawImages();
+    } else {
+        /* Painting over the picture of the turn before needs no
+           clear, and only its changed cells are painted. */
+        if (!BufferedPictureShown()) {
+            glk_window_clear(Graphics);
+            GraphicsWindowChanged();
+        }
+        DrawRoomImage();
+    }
+}
+
 /* Display the current room: description, visible objects (low objects
    inline, high objects after "You see:"), exits, and optional inventory.
    Draws the room image if graphics are enabled. */
@@ -378,8 +470,6 @@ void Look(void)
         CloseGraphicsWindow();
     else
         OpenGraphicsWindow();
-    int i;
-    int printed_any = 0;
 
     PendSpace = 0;
     /* Skip the output reset while a line-input event is pending in the
@@ -407,58 +497,13 @@ void Look(void)
         OutString("You are ");
     PrintRoom(MyLoc);
 
-    /* "Low" objects are part of the room description (e.g. "...a sword
-       lies here."). They're listed inline rather than after "You see:". */
-    for (i = 0; i < NumLowObjects; i++) {
-        if (ObjectLoc[i] == MyLoc) {
-            if (!printed_any) {
-                if (Version == QUESTPROBE3_TYPE) {
-                    OutReplace(0);
-                    SysMessage(YOU_SEE);
-                } else if (BaseGame == HEMAN || BaseGame == REBEL_PLANET) {
-                    OutChar(' ');
-                }
-                printed_any = 1;
-            }
-            PendSpace = 1;
-            PrintObject(i);
-        }
-    }
-    if (printed_any && !isalpha((unsigned char)LastChar))
-        OutReplace('.');
+    ListLowObjects();
 
-    /* QP3 has no "You see:" phase — every visible item is a low object.
-       For other versions, continue scanning from the same `i` to list
-       higher-numbered objects under a "You see:" heading. */
+    /* QP3 has no "You see:" phase — every visible item is a low object. */
     if (Version == QUESTPROBE3_TYPE) {
         ListExits(1);
     } else {
-        printed_any = 0;
-        for (; i < NumObjects(); i++) {
-            if (ObjectLoc[i] == MyLoc) {
-                if (!printed_any) {
-                    /* Only the text-only and hybrid games */
-                    if (BaseGame == TEMPLE_OF_TERROR
-                        && CurrentGame != TEMPLE_OF_TERROR
-                        && CurrentGame != TEMPLE_OF_TERROR_64) {
-                        OutChar(' ');
-                    }
-                    SysMessage(YOU_SEE);
-                    if (CurrentGame == BLIZZARD_PASS) {
-                        PendSpace = 0;
-                        OutString(":- ");
-                    }
-                    if (Version == REBEL_PLANET_TYPE)
-                        OutReplace(0);
-                    printed_any = 1;
-                }
-                PrintObject(i);
-            }
-        }
-        if (printed_any)
-            OutReplace('.');
-        else
-            OutChar('.');
+        ListHighObjects();
         ListExits(BaseGame != TEMPLE_OF_TERROR && BaseGame != HEMAN);
     }
 
@@ -476,25 +521,7 @@ void Look(void)
 
     BottomWindow();
 
-    if (MyLoc != 0 && !NoGraphics && TAYLOR_GRAPHICS_ENABLED && Graphics) {
-        /* A resize-in-progress: reuse the buffered image rather than
-           re-running the room's drawing pipeline. */
-        if (Resizing) {
-            DrawBufferedPicture();
-            return;
-        }
-        if (Version == QUESTPROBE3_TYPE) {
-            QP3RedrawImages();
-        } else {
-            /* Painting over the picture of the turn before needs no
-               clear, and only its changed cells are painted. */
-            if (!BufferedPictureShown()) {
-                glk_window_clear(Graphics);
-                GraphicsWindowChanged();
-            }
-            DrawRoomImage();
-        }
-    }
+    DrawRoomPicture();
 }
 
 /* Check if direction word v has a matching exit from the current room.
@@ -514,17 +541,32 @@ static int AutoExit(unsigned char v)
     return 0;
 }
 
+static void LookIfRedrawn(void)
+{
+    if (Redraw)
+        Look();
+}
+
 /* Check if a word code is a direction (N/S/E/W/U/D etc.). */
 static int IsDir(unsigned char word)
 {
     if (word == 0)
         return 0;
     /* Direction words share their codes with the direction system
-       messages. QP3 has the four compass points first and two more
-       direction words further up; the others have all ten in a row. */
+       messages. QP3 has six in a row (5 and 6 are up and down, though
+       only BELOW, BENEATH and UNDER have those codes) and the words U, UP
+       and D further up; the others have all ten in a row. Below these
+       the originals answer an unmatched command with "You can't go that
+       way". */
     if (Version == QUESTPROBE3_TYPE)
-        return (word <= WEST || word == 57 || word == 60);
+        return (word <= Q3_LAST_DIRECTION || word == Q3_WORD_UP || word == Q3_WORD_DOWN);
     return (word <= SOUTHWEST);
+}
+
+/* Whether the command is a move: a direction, or GO and a direction */
+static int IsMoveCommand(unsigned char verb)
+{
+    return IsDir(verb) || (Word[0] == GoVerb && IsDir(Word[1]));
 }
 
 /* Process one player command: try extra commands, direction auto-exits,
@@ -536,28 +578,28 @@ static void RunOneInput(void)
 
     if (FoundExtraCommand) {
         if (TryExtraCommand()) {
-            if (Redraw)
-                Look();
+            LookIfRedrawn();
             return;
         }
     }
-    if (Word[0] == 0 && Word[1] == 0) {
+    /* Questprobe 3 gives up when there is no verb, the later games only
+       when there is no word at all: a noun alone goes through their
+       tables. */
+    if (KnownWords == 0 || (Version == QUESTPROBE3_TYPE && Word[0] == 0)) {
         if (TryExtraCommand() == 0) {
             OutCaps();
             SysMessage(I_DONT_UNDERSTAND);
             StopTime = 2;
         } else {
-            if (Redraw)
-                Look();
+            LookIfRedrawn();
         }
         return;
     }
-    if (IsDir(Word[0]) || (Word[0] == GoVerb && IsDir(Word[1]))) {
+    if (IsMoveCommand(Word[0])) {
         if (AutoExit(Word[0]) || AutoExit(Word[1])) {
             StopTime = 0;
             RunStatusTable();
-            if (Redraw)
-                Look();
+            LookIfRedrawn();
             return;
         }
     }
@@ -569,31 +611,21 @@ static void RunOneInput(void)
         LastNoun = Word[1];
 
     OutCaps();
-    RunCommandTable();
+    RunEventTable();
 
     if (ActionsExecuted == 0) {
         int OriginalVerb = Word[0];
         if (TryExtraCommand() == 0) {
-            if (LastVerb) {
-                /* Retry with the previous verb in front of the words. */
-                memmove(Word + 1, Word, 4);
-                Word[0] = LastVerb;
-                RunCommandTable();
+            if (IsMoveCommand(OriginalVerb)) {
+                SysMessage(YOU_CANT_GO_THAT_WAY);
+            } else if (OriginalVerb) {
+                SysMessage(THATS_BEYOND_MY_POWER);
+            } else {
+                SysMessage(I_DONT_UNDERSTAND_THAT_VERB);
             }
-            if (ActionsExecuted == 0) {
-                if (IsDir(OriginalVerb) || (Word[0] == GoVerb && IsDir(Word[1]))) {
-                    SysMessage(YOU_CANT_GO_THAT_WAY);
-                } else if (FoundVerb) {
-                    SysMessage(THATS_BEYOND_MY_POWER);
-                } else if (FoundNoun == 1)  {
-                    SysMessage(I_DONT_UNDERSTAND_THAT_VERB);
-                } else {
-                    SysMessage(I_DONT_UNDERSTAND);
-                }
-                OutFlush();
-                StopTime = 1;
-                return;
-            }
+            OutFlush();
+            StopTime = 1;
+            return;
         } else {
             if (Redraw)
                 Look();
@@ -601,10 +633,7 @@ static void RunOneInput(void)
         }
     }
 
-    if (Word[0] != 0)
-        LastVerb = Word[0];
-
-    if (Redraw && !((BaseGame == REBEL_PLANET && MyLoc == 250) || (BaseGame == KAYLETH && MyLoc == 15))) {
+    if (Redraw && !((BaseGame == REBEL_PLANET && MyLoc == REBEL_ROOM_INSIDE_KUBE) || (BaseGame == KAYLETH && MyLoc == KAYLETH_ROOM_AZAP_ELY))) {
         Look();
     }
 
@@ -656,9 +685,9 @@ static void RestartGame(void)
     Look();
 }
 
-/* Main entry point. Loads and identifies the game file, locates all data
-   tables, initializes graphics, and enters the main input/action loop. */
-void glk_main(void)
+/* Unpack the game file if it is a C64 container, and work out which game
+   it is. Sets Game and FileBaselineOffset; does not return on failure. */
+static void IdentifyGame(void)
 {
     /* Step 1: load the game file. DetectC64 handles both raw image files
        and C64 disk-image containers, decrunching as needed; the file is
@@ -666,18 +695,15 @@ void glk_main(void)
     if (DetectC64(&FileImage, &FileImageLen) != UNKNOWN_GAME) {
         EndOfData = FileImage + FileImageLen;
     } else {
-        fprintf(stderr, "DetectC64 did not recognize the game\n");
+        /* Not an error: every ZX Spectrum file ends up here */
+        debug_print("Not a C64 image\n");
     }
 
-#ifdef DEBUG
-    fprintf(stderr, "Loaded %zu bytes.\n", FileImageLen);
-#endif
+    debug_print("Loaded %zu bytes.\n", FileImageLen);
 
-    /* Step 2: locate the verb table by scanning for its signature — the
-       dictionary always starts with "NORT" + code 1 + "N" (the first
-       direction word, "NORTH", with code 1 followed by its alias "N"). */
-    VerbBase = FindCode("NORT\001N", 0, 6);
-    if (VerbBase == -1) {
+    /* Step 2: locate the verb table by scanning for its signature */
+    VerbBase = FindVerbTable();
+    if (VerbBase == NOT_FOUND) {
         Fatal("This is not a TaylorMade game: no verb table found");
     }
 
@@ -691,9 +717,41 @@ void glk_main(void)
     } else {
         FileBaselineOffset = VerbBase - Game->start_of_dictionary;
     }
-#ifdef DEBUG
-    fprintf(stderr, "FileBaselineOffset: %ld\n", FileBaselineOffset);
-#endif
+    debug_print("FileBaselineOffset: %ld\n", FileBaselineOffset);
+}
+
+/* Step 5: initialize state and present the opening room. NewGame()
+   resets flags and objects; GuessLowObjectEnd() determines which
+   objects render inline vs. in the "You see:" list; the initial
+   state is snapshotted for the RESTART command. */
+static void StartGame(void)
+{
+    NewGame();
+    NumLowObjects = GuessLowObjectEnd();
+    InitialState = SaveCurrentState();
+
+    /* Run the status table once on entry so any per-turn setup actions
+       (e.g. drawing the first room image) execute before the prompt. */
+    RunStatusTable();
+    if (Redraw) {
+        OutFlush();
+        Look();
+    }
+
+    /* Kayleth begins with a non-interactive "preview" sequence before
+       handing control to the player; load its animation data and arm
+       the flag so that undo is suppressed until MyLoc reaches 1. */
+    if (BaseGame == KAYLETH) {
+        LoadKaylethAnimationData();
+        InKaylethPreview = 1;
+    }
+}
+
+/* Main entry point. Loads and identifies the game file, locates all data
+   tables, initializes graphics, and enters the main input/action loop. */
+void glk_main(void)
+{
+    IdentifyGame();
 
     /* Seed the RNG. In determinism mode (used by automated tests and
        transcript playback) we use a fixed seed; otherwise time-based. */
@@ -730,33 +788,9 @@ void glk_main(void)
     /* Step 4: locate all the remaining tables (tokens, messages, rooms,
        actions, etc.) using game-specific offsets or signature scans. */
     FindTables();
-#ifdef DEBUG
     InitActionDebugging();
-#endif
 
-    /* Step 5: initialize state and present the opening room. NewGame()
-       resets flags and objects; GuessLowObjectEnd() determines which
-       objects render inline vs. in the "You see:" list; the initial
-       state is snapshotted for the RESTART command. */
-    NewGame();
-    NumLowObjects = GuessLowObjectEnd();
-    InitialState = SaveCurrentState();
-
-    /* Run the status table once on entry so any per-turn setup actions
-       (e.g. drawing the first room image) execute before the prompt. */
-    RunStatusTable();
-    if (Redraw) {
-        OutFlush();
-        Look();
-    }
-
-    /* Kayleth begins with a non-interactive "preview" sequence before
-       handing control to the player; load its animation data and arm
-       the flag so that undo is suppressed until MyLoc reaches 1. */
-    if (BaseGame == KAYLETH) {
-        LoadKaylethAnimationData();
-        InKaylethPreview = 1;
-    }
+    StartGame();
 
     /* Main turn loop: snapshot undo state, read a command, execute it,
        and repeat forever. Exits are handled by glk_exit() from within

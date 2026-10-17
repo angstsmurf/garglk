@@ -21,8 +21,8 @@
 
 int JustRestored = 0;
 int JustRestarted = 0;
-ImgType SavedImgType;
-int SavedImgIndex;
+ImgType RestoredImgType = NO_IMG;
+int RestoredImgIndex;
 
 SavedState *InitialState = NULL;
 static SavedState *ramsave = NULL;
@@ -33,11 +33,21 @@ static int number_of_undos;
 
 SavedState *SaveCurrentState(void)
 {
-    SavedState *s = (SavedState *)MemAlloc(sizeof(SavedState));
+    size_t items = GameHeader.NumItems + 1, rooms = GameHeader.NumRooms + 1;
+    /* The exits are ints, so they go first after the struct for alignment */
+    SavedState *s = (SavedState *)MemAlloc(sizeof(SavedState)
+        + rooms * sizeof s->RoomExits[0] + 2 * items * sizeof(uint16_t));
+    s->RoomExits = (int (*)[NUM_SAVED_EXIT_COLUMNS])(s + 1);
+    s->ObjectLocations = (uint16_t *)(s->RoomExits + rooms);
+    s->ItemFlags = s->ObjectLocations + items;
 
     memcpy(s->Counters, Counters, sizeof s->Counters);
-    for (int i = 0; i <= GameHeader.NumItems; i++)
+    for (size_t i = 0; i < items; i++) {
         s->ObjectLocations[i] = Items[i].Location;
+        s->ItemFlags[i] = Items[i].Flag;
+    }
+    for (size_t i = 0; i < rooms; i++)
+        memcpy(s->RoomExits[i], Rooms[i].Exits, sizeof s->RoomExits[i]);
 
     s->BitFlags = BitFlags;
     s->ProtagonistString = ProtagonistString;
@@ -65,8 +75,12 @@ void RestoreState(SavedState *state)
     StopAnimation();
     memcpy(Counters, state->Counters, sizeof state->Counters);
 
-    for (int i = 0; i <= GameHeader.NumItems; i++)
+    for (int i = 0; i <= GameHeader.NumItems; i++) {
         Items[i].Location = state->ObjectLocations[i];
+        Items[i].Flag = state->ItemFlags[i];
+    }
+    for (int i = 0; i <= GameHeader.NumRooms; i++)
+        memcpy(Rooms[i].Exits, state->RoomExits[i], sizeof state->RoomExits[i]);
 
     BitFlags = state->BitFlags;
     ProtagonistString = state->ProtagonistString;
@@ -193,10 +207,27 @@ void SaveGame(void)
         snprintf(buf, sizeof buf, "%hd\n", (short)Items[ct].Location);
         glk_put_string_stream(file, buf);
     }
+    for (ct = 0; ct <= GameHeader.NumItems; ct++) {
+        snprintf(buf, sizeof buf, "%u\n", (unsigned)Items[ct].Flag);
+        glk_put_string_stream(file, buf);
+    }
+    for (ct = 0; ct <= GameHeader.NumRooms; ct++) {
+        int *e = Rooms[ct].Exits;
+        snprintf(buf, sizeof buf, "%d %d %d %d %d %d %d\n", e[0], e[1], e[2], e[3], e[4], e[5], e[6]);
+        glk_put_string_stream(file, buf);
+    }
 
+    /* Glk reports no write errors, so there is nothing to check here */
     glk_stream_close(file, NULL);
     SystemMessage(SAVED);
     SetBit(STOPTIMEBIT);
+}
+
+/* Read one line of a saved game into buf. Returns 0 at end of file, so a
+   short file fails explicitly rather than through sscanf on an empty line. */
+static int ReadSaveLine(strid_t file, char *buf, glui32 size)
+{
+    return glk_get_line_stream(file, buf, size) != 0;
 }
 
 int LoadGame(void)
@@ -222,32 +253,58 @@ int LoadGame(void)
     int result;
 
     for (ct = 0; ct < NUM_COUNTERS; ct++) {
-        glk_get_line_stream(file, buf, sizeof buf);
-        result = sscanf(buf, "%" SCNd16, &Counters[ct]);
-        if (result != 1) {
+        if (!ReadSaveLine(file, buf, sizeof buf) || sscanf(buf, "%" SCNd16, &Counters[ct]) != 1) {
             RecoverFromBadRestore(state, file);
             return 0;
         }
     }
-    glk_get_line_stream(file, buf, sizeof buf);
-    int SavedImgTypeInt;
-    result = sscanf(buf, "%" SCNu64 " %d %d %d %d\n", &BitFlags, &ProtagonistString,
-        &dummy, &SavedImgTypeInt, &SavedImgIndex);
-    SavedImgType = SavedImgTypeInt;
+    int imgtype = NO_IMG, imgindex = 0;
+    result = 0;
+    if (ReadSaveLine(file, buf, sizeof buf))
+        result = sscanf(buf, "%" SCNu64 " %d %d %d %d\n", &BitFlags, &ProtagonistString,
+            &dummy, &imgtype, &imgindex);
     debug_print("LoadGame: Result of sscanf: %d\n", result);
     if ((result < 3) || MyLoc > GameHeader.NumRooms || MyLoc < 1) {
         RecoverFromBadRestore(state, file);
         return 0;
     }
+    /* The image fields are optional; ignore them if missing or garbled */
+    if (result < 5 || imgtype < NO_IMG || imgtype > IMG_SPECIAL)
+        imgtype = NO_IMG;
 
     for (ct = 0; ct <= GameHeader.NumItems; ct++) {
-        glk_get_line_stream(file, buf, sizeof buf);
-        result = sscanf(buf, "%hd\n", &lo);
-        Items[ct].Location = (unsigned char)lo;
-        if (result != 1 || (Items[ct].Location > GameHeader.NumRooms && Items[ct].Location != CARRIED && Items[ct].Location != HIDDEN && Items[ct].Location != HELD_BY_OTHER_GUY)) {
-            fprintf(stderr, "LoadGame: Unexpected item location in save game file (Item %d, %s, is in room %d)\n", ct, Items[ct].Text, Items[ct].Location);
+        result = 0;
+        if (ReadSaveLine(file, buf, sizeof buf))
+            result = sscanf(buf, "%hd\n", &lo);
+        /* Any non-negative room is possible: an action may put an item in
+           a room that does not exist (X-Men uses 500 for used-up items). */
+        if (result != 1 || lo < 0) {
+            debug_print("LoadGame: Unexpected item location in save game file (Item %d, %s)\n", ct, Items[ct].Text);
             RecoverFromBadRestore(state, file);
             return 0;
+        }
+        Items[ct].Location = (uint16_t)lo;
+    }
+
+    /* The item flags and the room exits were added later. A file that
+       ends after the item locations leaves them as they are. */
+    if (ReadSaveLine(file, buf, sizeof buf)) {
+        for (ct = 0; ct <= GameHeader.NumItems; ct++) {
+            unsigned flag;
+            if ((ct > 0 && !ReadSaveLine(file, buf, sizeof buf)) || sscanf(buf, "%u", &flag) != 1 || flag > UINT16_MAX) {
+                debug_print("LoadGame: Unexpected item flags in save game file (Item %d)\n", ct);
+                RecoverFromBadRestore(state, file);
+                return 0;
+            }
+            Items[ct].Flag = (uint16_t)flag;
+        }
+        for (ct = 0; ct <= GameHeader.NumRooms; ct++) {
+            int *e = Rooms[ct].Exits;
+            if (!ReadSaveLine(file, buf, sizeof buf) || sscanf(buf, "%d %d %d %d %d %d %d", &e[0], &e[1], &e[2], &e[3], &e[4], &e[5], &e[6]) != NUM_SAVED_EXIT_COLUMNS) {
+                debug_print("LoadGame: Unexpected room exits in save game file (Room %d)\n", ct);
+                RecoverFromBadRestore(state, file);
+                return 0;
+            }
         }
     }
 
@@ -255,7 +312,7 @@ int LoadGame(void)
     glk_stream_set_position(file, 0, seekmode_End);
     glui32 end = glk_stream_get_position(file);
     if (end != position) {
-        fprintf(stderr, "LoadGame: Save game file has unexpected length (%d, expected %d)\n", end, position);
+        debug_print("LoadGame: Save game file has unexpected length (%u, expected %u)\n", end, position);
         RecoverFromBadRestore(state, file);
         return 0;
     }
@@ -265,8 +322,10 @@ int LoadGame(void)
 
     JustStarted = 0;
     ClearAnimationBuffer();
-    LastImgType = SavedImgType;
-    LastImgIndex = SavedImgIndex;
+    LastImgType = imgtype;
+    LastImgIndex = imgindex;
+    RestoredImgType = LastImgType;
+    RestoredImgIndex = LastImgIndex;
 
     SetBit(DRAWBIT);
     Look(0);

@@ -384,7 +384,7 @@ if(WITH_PLUS)
         SRCS
         plus/animations.c plus/apple2detect.c plus/atari8detect.c plus/c64detect.c
         plus/companionfile.c plus/dumpactions.c plus/extracommands.c plus/gameinfo.c
-        plus/graphics.c plus/loaddatabase.c plus/parseinput.c plus/plusmain.c
+        plus/graphics.c plus/loaddatabase.c plus/opcodes.c plus/parseinput.c plus/plusmain.c
         plus/restorestate.c plus/sagadraw_glue.c plus/stdetect.c plus/stdraw.c
         common_utils/common_file_utils.c common_utils/common_utils.c
         common_utils/companion_search.c common_utils/layouttext.c
@@ -509,6 +509,7 @@ if(WITH_SCOTT)
         scott/saga/c64a8scott.c scott/saga/saga.c scott/saga/sagagraphics.c
         scott/saga/vector_common.c scott/ti994a/load_ti99_4a.c
         scott/ti994a/rtpi_graphics.c scott/ti994a/ti99_4a_terp.c
+        scott/ti994a/ti99_disk.c
         scott/ti994a/unzip_in_mem.c common_utils/common_file_utils.c
         common_utils/common_utils.c common_utils/companion_search.c
         common_utils/layouttext.c common_utils/memory_allocation.c
@@ -516,7 +517,8 @@ if(WITH_SCOTT)
         common_sagadraw/c64a8draw.c common_sagadraw/gm_artifact.c
         common_sagadraw/gm_vector.c common_sagadraw/pcdraw.c aiukgraphics/aiukpalette.c
         aiukgraphics/irmak.c aiukgraphics/taylordraw.c common_zxscreen/zx_title.c
-        decompressz80/decompressz80.c readwoz/ciderpress.c readwoz/woz2nib.c
+        decompressz80/alkatraz.c decompressz80/tapetzx.c decompressz80/z80snap.c
+        decompressz80/zxscreen.c readwoz/ciderpress.c readwoz/woz2nib.c
         INCLUDE_DIRS ${SCOTT_INCLUDE_DIRS}
         LIBS c64diskimage unp64 ${ZLIB_LIBRARIES})
 endif()
@@ -614,14 +616,15 @@ if(WITH_TAYLOR)
         taylor/actions.c taylor/alkatraz_screen.c taylor/animations.c
         taylor/c64decrunch.c taylor/decrypttotloader.c taylor/extracommands.c
         taylor/extracttape.c taylor/gameinfo.c taylor/gameload.c taylor/graphics.c
-        taylor/loading_screen.c taylor/loadtotpicture.c taylor/parseinput.c
+        taylor/loading_screen.c taylor/parseinput.c
         taylor/player.c taylor/restorestate.c taylor/textoutput.c taylor/ui.c
-        taylor/utility.c common_utils/common_file_utils.c common_utils/common_utils.c
+        common_utils/common_file_utils.c common_utils/common_utils.c
         common_utils/companion_search.c common_utils/layouttext.c
         common_utils/memory_allocation.c common_utils/randomness.c
         aiukgraphics/aiukpalette.c aiukgraphics/irmak.c
         aiukgraphics/taylordraw.c common_zxscreen/zx_title.c
-        decompressz80/decompressz80.c
+        decompressz80/alkatraz.c decompressz80/tapetzx.c decompressz80/z80snap.c
+        decompressz80/zxscreen.c
         INCLUDE_DIRS ${TAYLOR_INCLUDE_DIRS}
         LIBS c64diskimage unp64
         GPL2)

@@ -47,6 +47,7 @@
 #include "detect_game.h"
 #include "restore_state.h"
 #include "sagagraphics.h"
+#include "sagadraw_host.h"
 #include "vector_common.h"
 #include "rtpi_graphics.h"
 
@@ -67,9 +68,8 @@
 #ifdef SPATTERLIGHT
 #include "glkimp.h"
 #else
-/* Only Spatterlight has settings for these: pictures are always on, and
-   vector pictures are drawn in one go. */
-#define gli_enable_graphics 1
+/* Only Spatterlight has a setting for this: vector pictures and loading
+   screens are drawn in one go unless the -g option is given. */
 int gli_slowdraw = 0;
 #endif
 
@@ -102,9 +102,9 @@ char *DirPath = "."; /* Directory containing the game file */
 Header GameHeader;
 Item *Items = NULL;
 Room *Rooms = NULL;
-char **Verbs = NULL;
-char **Nouns = NULL;
-char **Messages = NULL;
+const char **Verbs = NULL;
+const char **Nouns = NULL;
+const char **Messages = NULL;
 Action *Actions = NULL;
 int LightRefill; /* Initial light duration, used when refilling the lamp */
 int Counters[NUM_COUNTERS] =
@@ -120,7 +120,7 @@ int AutoInventory = 0; /* Auto-display inventory in room descriptions */
 int Options; /* Option flags set */
 glui32 TopWidth; /* Terminal width */
 glui32 TopHeight; /* Height of top window */
-int ImageWidth = 255;
+int ImageWidth = 256; /* 32 character columns */
 int ImageHeight = 96;
 int file_baseline_offset = 0; /* Byte offset adjustment for files with extra data prepended */
 char *title_screen = NULL;
@@ -144,7 +144,9 @@ int showing_inventory = 0;
 int showing_closeup = 0;
 int last_image_index = -1;
 int lastwasnewline = 0;
-int should_draw_image = 0;
+/* Set from the start, so that the first room has its picture even when no
+   arrange event comes first to ask for one. */
+int should_draw_image = 1;
 
 /* JustStarted is only used for the error message "Can't undo on first move" */
 int JustStarted = 1;
@@ -154,6 +156,7 @@ int StopTime = 0; /* When > 0, suppresses automatic (implicit) actions and decre
 int should_look_in_transcript = 0;
 
 int split_screen = 1;
+static int forced_style = -1; /* Display style number of the -t option, or -1 */
 winid_t Bottom, Top;
 winid_t Graphics;
 
@@ -267,19 +270,27 @@ void Updates(event_t ev)
         CloseGraphicsWindow();
         OpenGraphicsWindow();
 
-        if (!gli_enable_graphics)
+        if (!GraphicsEnabled())
             glk_request_timer_events(0);
 
-        if (split_screen && gli_enable_graphics) {
+        /* Without split screen the room description and inventory are in
+           the main window's scrollback: redraw only the picture. */
+        if (GraphicsEnabled()) {
             int saved_slowdraw = gli_slowdraw;
             gli_slowdraw = 0;
             if (showing_inventory == 1) {
-                UpdateUSInventory();
+                if (split_screen)
+                    UpdateUSInventory();
+                else
+                    InventoryUS();
             } else {
                 int lastimg = last_image_index;
                 if (!showing_closeup)
                     should_draw_image = 1;
-                Look();
+                if (split_screen)
+                    Look();
+                else
+                    DrawRoomImage();
                 last_image_index = lastimg;
                 if (showing_closeup) {
                     should_draw_image = 1;
@@ -316,9 +327,7 @@ GLK_ATTRIBUTE_NORETURN void CleanupAndExit(void)
     if (Transcript)
         glk_stream_close(Transcript, NULL);
     if (DrawingVector()) {
-#ifdef SPATTERLIGHT
         gli_slowdraw = 0;
-#endif
         DrawSomeVectorPixels(0);
     }
     glk_exit();
@@ -369,19 +378,17 @@ int MatchUpItem(int noun, int loc)
    "//" or "[slash]*" (conventions meaning "no auto-get word"). */
 void ParseItemSlashAutoGet(int index)
 {
-    Items[index].AutoGet = strchr(Items[index].Text, '/');
-    if (Items[index].AutoGet == NULL)
+    char *word = strchr(Items[index].Text, '/');
+    Items[index].AutoGet = NULL;
+    if (word == NULL || strcmp(word, "//") == 0 || strcmp(word, "/*") == 0)
         return;
-    if (strcmp(Items[index].AutoGet, "//") == 0 || strcmp(Items[index].AutoGet, "/*") == 0) {
-        Items[index].AutoGet = NULL;
-        return;
-    }
     /* NUL-terminate the description and advance past the '/' */
-    *Items[index].AutoGet++ = 0;
+    *word++ = 0;
     /* Strip the trailing '/' from the word */
-    char *trailingslash = strchr(Items[index].AutoGet, '/');
+    char *trailingslash = strchr(word, '/');
     if (trailingslash != NULL)
         *trailingslash = 0;
+    Items[index].AutoGet = word;
 }
 
 /* Read a double-quoted string from a ScottFree plaintext database file.
@@ -439,13 +446,15 @@ static void FreeDatabaseString(char *string)
         free(string);
 }
 
-/* Free entries 0..last of a string array, then the array itself */
-static void FreeStringArray(char **array, int last)
+/* Free entries 0..last of a string array, then the array itself. The
+   arrays are const for the parser, which only reads them; the loaders
+   allocated the strings, so the cast is the one place that owns them. */
+static void FreeStringArray(const char **array, int last)
 {
     if (array == NULL)
         return;
     for (int i = 0; i <= last; i++)
-        FreeDatabaseString(array[i]);
+        FreeDatabaseString((char *)array[i]);
     free(array);
 }
 
@@ -700,21 +709,106 @@ glkunix_argumentlist_t glkunix_arguments[] = {
     { "-s", glkunix_arg_NoValue,
         "-s        Generate authentic Scott Adams driver light messages rather "
         "than other driver style ones (Light goes out in n turns..)" },
-    { "-t", glkunix_arg_NoValue,
-        "-t        Generate TRS80 style display (terminal width is 64 characters; "
-        "a line <-----------------> is displayed after the top stuff; objects "
-        "have periods after them instead of hyphens" },
+    { "-t", glkunix_arg_NumberValue,
+        "-t N      Lay out the room description in style N, whatever the game "
+        "file: 0 plain ScottFree, 1 TRS-80, 2 ZX Spectrum, 3 TI-99/4A, 4 IBM PC" },
     { "-p", glkunix_arg_NoValue,
         "-p        Use for prehistoric databases which don't use bit 16" },
     { "-w", glkunix_arg_NoValue, "-w        Disable upper window" },
     { "-n", glkunix_arg_NoValue, "-n        No delays" },
     { "-f", glkunix_arg_NoValue, "-f        Flicker the room description like some original games" },
+#ifndef SPATTERLIGHT
+    { "-g", glkunix_arg_NoValue,
+        "-g        Draw vector pictures and loading screens gradually, "
+        "as the original games do" },
+    { "-c", glkunix_arg_NoValue,
+        "-c        Draw pictures in the Commodore 64 palette, whatever the game file" },
+    { "-x", glkunix_arg_NoValue,
+        "-x        Draw pictures in the ZX Spectrum palette, whatever the game file" },
+    { "-a", glkunix_arg_NoValue,
+        "-a        Always list what you carry in the upper window" },
+#else
     { "-z", glkunix_arg_ValueFollows,
         "-z path   Run the vector image tests with this support path, then exit" },
+#endif
     { "", glkunix_arg_ValueFollows, "filename    file to load" },
 
     { NULL, glkunix_arg_End, NULL }
 };
+
+/* Parse the leading -options. Returns the number of arguments consumed
+   after argv[0]; the game file, if any, follows them. */
+static int ParseOptions(int argc, char **argv)
+{
+    int i = 1;
+    for (; i < argc && argv[i][0] == '-'; i++) {
+        const char *opt = argv[i];
+        switch (opt[1]) {
+        case 'y':
+            Options |= YOUARE;
+            break;
+        case 'i':
+            Options &= ~YOUARE;
+            break;
+        case 'd':
+            Options |= DEBUGGING;
+            break;
+        case 's':
+            Options |= SCOTTLIGHT;
+            break;
+        case 't':
+            /* -tN or -t N. A bare -t is the TRS-80 style, as it
+               always was. */
+            if (isdigit((unsigned char)opt[2])) {
+                forced_style = atoi(opt + 2);
+            } else if (i + 1 < argc && isdigit((unsigned char)argv[i + 1][0])
+                && argv[i + 1][1] == '\0') {
+                forced_style = atoi(argv[++i]);
+            } else {
+                forced_style = 1;
+            }
+            break;
+        case 'p':
+            Options |= PREHISTORIC_LAMP;
+            break;
+        case 'w':
+            split_screen = 0;
+            break;
+        case 'n':
+            Options |= NO_DELAYS;
+            break;
+        case 'f':
+            Options |= FLICKER_ON;
+            break;
+#ifndef SPATTERLIGHT
+        case 'g':
+            gli_slowdraw = 1;
+            break;
+        case 'c':
+            Options = (Options | FORCE_PALETTE_C64) & ~FORCE_PALETTE_ZX;
+            break;
+        case 'x':
+            Options = (Options | FORCE_PALETTE_ZX) & ~FORCE_PALETTE_C64;
+            break;
+        case 'a':
+            Options = (Options | FORCE_INVENTORY) & ~FORCE_INVENTORY_OFF;
+            break;
+#else
+        case 'z':
+            /* Run the vector image tests with the support path that
+               follows, report the result and exit. */
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Usage: -z path\n");
+                glk_exit();
+            }
+            fprintf(stderr, "Running tests\n");
+            win_testresult(RunTests(argv[++i]));
+            glk_exit();
+#endif
+        }
+    }
+    return i - 1;
+}
 
 /* Parse command-line arguments (display style, debugging, delays, etc.)
    and extract the game file path and its parent directory. */
@@ -726,75 +820,29 @@ int glkunix_startup_code(glkunix_startup_t *data)
     if (argc < 1)
         return 0;
 
-    if (argc > 1)
-        while (argv[1]) {
-            if (*argv[1] != '-')
-                break;
-            switch (argv[1][1]) {
-            case 'y':
-                Options |= YOUARE;
-                break;
-            case 'i':
-                Options &= ~YOUARE;
-                break;
-            case 'd':
-                Options |= DEBUGGING;
-                break;
-            case 's':
-                Options |= SCOTTLIGHT;
-                break;
-            case 't':
-                Options |= TRS80_STYLE;
-                break;
-            case 'p':
-                Options |= PREHISTORIC_LAMP;
-                break;
-            case 'w':
-                split_screen = 0;
-                break;
-            case 'n':
-                Options |= NO_DELAYS;
-                break;
-            case 'f':
-                Options |= FLICKER_ON;
-                break;
-#ifdef SPATTERLIGHT
-            case 'z':
-                // Run the test suite RunTests() with the support file path as parameter,
-                // call win_testresult() with the return value as parameter,
-                // exit.
-                fprintf(stderr, "Running tests\n");
-                win_testresult(RunTests(argv[2]));
-                glk_exit();
-#endif
-            }
-            argv++;
-            argc--;
-        }
+    int consumed = ParseOptions(argc, argv);
+    argc -= consumed;
+    argv += consumed;
 
 #ifdef GARGLK
-    garglk_set_program_name("ScottFree 1.14");
-    garglk_set_program_info("ScottFree 1.14 by Alan Cox\n"
+    garglk_set_program_name("ScottFree 1.15");
+    garglk_set_program_info("ScottFree 1.15 by Alan Cox\n"
                             "Glk port by Chris Spiegel\n");
 #endif
 
     if (argc == 2) {
         game_file = argv[1];
 
+        const char *base = strrchr(game_file, '/');
+        if (base == NULL)
+            base = strrchr(game_file, '\\');
+        base = base ? base + 1 : game_file;
+
 #ifdef GARGLK
-        const char *s;
-        if ((s = strrchr(game_file, '/')) != NULL || (s = strrchr(game_file, '\\')) != NULL) {
-            garglk_set_story_name(s + 1);
-        } else {
-            garglk_set_story_name(game_file);
-        }
+        garglk_set_story_name(base);
 #endif
 
-        const char *n;
-        int dirlen = 0;
-        if ((n = strrchr(game_file, '/')) != NULL || (n = strrchr(game_file, '\\')) != NULL) {
-            dirlen = (int)(n - game_file + 1);
-        }
+        int dirlen = (int)(base - game_file);
         if (dirlen) {
             DirPath = MemAlloc(dirlen + 1);
             memcpy(DirPath, game_file, dirlen);
@@ -854,6 +902,25 @@ static void ApplyUSSysmess(void)
     sys[DOWN] = "DOWN";
 }
 
+/* The -t option: replace the display style the game file asked for.
+   The system messages stay the game's own. */
+static void ApplyForcedStyle(void)
+{
+    static const int styles[] = {
+        0,                         /* 0: plain ScottFree */
+        TRS80_STYLE,               /* 1: TRS-80 */
+        SPECTRUM_STYLE,            /* 2: ZX Spectrum */
+        TI994A_STYLE,              /* 3: TI-99/4A */
+        SPECTRUM_STYLE | PC_STYLE, /* 4: IBM PC */
+    };
+
+    if (forced_style < 0 || forced_style >= (int)(sizeof styles / sizeof styles[0]))
+        return;
+
+    Options &= ~(TRS80_STYLE | SPECTRUM_STYLE | TI994A_STYLE | PC_STYLE);
+    Options |= styles[forced_style];
+}
+
 /* Select the "You are" or the "I am" system message set */
 static void SelectSystemMessages(void)
 {
@@ -880,6 +947,8 @@ static void SetUpGame(void)
         Options |= SPECTRUM_STYLE;
     else if (game_type != TI994A)
         Options |= TRS80_STYLE;
+
+    ApplyForcedStyle();
 
     if (ZXLoadingScreen != NULL && Game->type != US_VARIANT)
         DrawZXTitleImage();
@@ -921,7 +990,8 @@ one letter.\n\nDo you want to restore previously saved game?\n",
             if (CurrentGame == RETURN_TO_PIRATES_ISLE)
                 UpdateRTPISystemMessages();
 
-            Options |= PC_STYLE;
+            if (forced_style < 0)
+                Options |= PC_STYLE;
         } else {
             CurrentGame = SCOTTFREE;
             Game->type = NO_TYPE;
@@ -1001,8 +1071,10 @@ void glk_main(void)
     SelectSystemMessages();
     SetUpGame();
 
-#ifdef SPATTERLIGHT
+    /* Not only for Spatterlight's preferences: this is also where the
+       palette is first chosen, from the game file or the -c / -x options. */
     UpdateSettings();
+#ifdef SPATTERLIGHT
     if (gli_determinism)
         set_erkyrath_random(DETERMINISTIC_SEED);
     else

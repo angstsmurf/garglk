@@ -38,8 +38,11 @@ typedef enum {
 /* A registry entry identifying a known C64 game image.
    Fields: game ID, expected file length, 16-bit additive checksum,
    container type, number of unp64 decompression passes, optional
-   unp64 switch string, which iteration to apply switches on, how the
-   game is stored, and the file name for TWO_FILES_BY_NAME. */
+   unp64 switch string, the pass (1-based) the switches apply to, how the
+   game is stored, and the file name for TWO_FILES_BY_NAME. The last three
+   are for the releases that unpack their picture data to somewhere other
+   than where the game has it: relocate_size bytes are moved from
+   relocate_from to relocate_to in the unpacked file. */
 typedef struct {
     GameIDType id;
     size_t length;
@@ -47,9 +50,12 @@ typedef struct {
     file_type type;
     int decompress_iterations;
     const char *switches;
-    int parameter;
+    int switch_pass;
     file_layout layout;
     const char *filename;
+    size_t relocate_to;
+    size_t relocate_from;
+    size_t relocate_size;
 } c64rec;
 
 /* Known C64 TaylorMade game images indexed by file size + checksum.
@@ -60,12 +66,12 @@ static const c64rec c64_registry[] = {
     { QUESTPROBE3_64, 0x8298, 0xb93e, TYPE_T64, 1, NULL, 0, ONE_FILE, NULL }, // Questprobe 3, PUCrunch
     { QUESTPROBE3_64, 0x2ab00, 0x863d, TYPE_D64, 1, NULL, 0, ONE_FILE, NULL }, // Questprobe 3, PUCrunch
     { REBEL_PLANET_64, 0xd541, 0x593a, TYPE_T64, 1, NULL, 0, ONE_FILE, NULL }, // Rebel Planet C64 (T64) 1001 CardCruncher Old Packer
-    { REBEL_PLANET_64, 0x2ab00, 0xa46f, TYPE_D64, 2, "-e0x0fe9", 2, ONE_FILE, NULL }, // Rebel_Planet_1986_Adventure_International.d64
+    { REBEL_PLANET_64, 0x2ab00, 0xa46f, TYPE_D64, 2, "-e0x0fe9", 2, ONE_FILE, NULL, 0x198a, 0x098a, 0x2e79 }, // Rebel_Planet_1986_Adventure_International.d64
     { REBEL_PLANET_64, 0x2ab00, 0x932e, TYPE_D64, 1, NULL, 0, ONE_FILE, NULL }, // Rebel_Planet_1986_Adventure_International_cr_TFF.d64
 
     { HEMAN_64, 0xfa17, 0xfbd2, TYPE_T64, 2, NULL, 0, ONE_FILE, NULL }, // Terraquake C64 (T64) Super Compressor / Flexible -> ECA Compacker
     { HEMAN_64, 0x2ab00, 0x4625, TYPE_D64, 2, NULL, 0, ONE_FILE, NULL }, // Masters_of_the_Universe_Terraquake_1987_Gremlin_Graphics_cr_TIA.d64
-    { HEMAN_64, 0x2ab00, 0x78ba, TYPE_D64, 4, "-e0xc400", 4, ONE_FILE, NULL }, // Masters_of_the_Universe_Terraquake_1987_Gremlin_Graphics_cr_Popeye.d64
+    { HEMAN_64, 0x2ab00, 0x78ba, TYPE_D64, 4, "-e0xc400", 4, ONE_FILE, NULL, 0x4808, 0xc802, 0x1400 }, // Masters_of_the_Universe_Terraquake_1987_Gremlin_Graphics_cr_Popeye.d64
     // The first pass also unpacks the crack intro at $c000, which tells the
     // next depacker that its data ends at $b1db. Cut the output there.
     { HEMAN_64, 0x2ab00, 0xbd68, TYPE_D64, 4, "-t0xb1da", 1, ONE_FILE, NULL }, // He-Man and the Masters of the Universe in Terraquake (c64.com), WCC crack: ECA Compacker -> Super Compressor / Flexible -> two more
@@ -75,7 +81,7 @@ static const c64rec c64_registry[] = {
     { TEMPLE_OF_TERROR_64, 0x10baa, 0x3b37, TYPE_T64, 4, NULL, 0, T64_TWO_RECORDS, NULL }, // Temple of Terror C64 alt (T64) 1001 CardCruncher New Packer -> 1001 CardCruncher ACM -> Triad-01 -> Mr.Z Packer
     { TOT_TEXT_ONLY_64, 0x10baa, 0x3b37, TYPE_T64, 3, NULL, 0, T64_TWO_RECORDS, NULL }, // Temple of Terror C64 alt (T64) 1001 CardCruncher New Packer -> 1001 CardCruncher ACM -> Triad-01 -> Mr.Z Packer
     { TEMPLE_OF_TERROR_64, 0x2ab00, 0x5720, TYPE_D64, 4, "-e0xc1ef", 2, ONE_FILE, NULL }, // Temple of Terror C64 (D64) ECA Compacker -> Super Compressor / Flexible -> Super Compressor / Equal sequences -> Super Compressor / Equal chars
-    { TEMPLE_OF_TERROR_64, 0x2ab00, 0xf3b4, TYPE_D64, 3, NULL, 0, ONE_FILE, NULL }, // Temple_of_Terror_1987_U.S._Gold_cr_FBR.d64
+    { TEMPLE_OF_TERROR_64, 0x2ab00, 0xf3b4, TYPE_D64, 3, NULL, 0, ONE_FILE, NULL, 0x4808, 0xd802, 0x1400 }, // Temple_of_Terror_1987_U.S._Gold_cr_FBR.d64
     { TEMPLE_OF_TERROR_64, 0x2ab00, 0x577e, TYPE_D64, 4, NULL, 0, TWO_FILES_BY_NAME, "TEMPLE O.TERROR2" }, // Temple_of_Terror_1987_U.S._Gold_cr_Triad.d64
     { TOT_TEXT_ONLY_64, 0x2ab00, 0x577e, TYPE_D64, 4, NULL, 0, TWO_FILES_BY_NAME, "TEMPLE O.TERROR1" }, // Temple_of_Terror_1987_U.S._Gold_cr_Triad.d64
     { TEMPLE_OF_TERROR_64, 0x2ab00, 0x7b2d, TYPE_D64, 0, NULL, 0, TWO_FILES_BY_TS, NULL }, // Temple of Terror - Trianon.d64
@@ -102,30 +108,12 @@ static const c64rec c64_registry[] = {
 
 static GameIDType ProcessC64(uint8_t **sf, size_t *extent, c64rec entry);
 
-/* Extract the largest file from a D64 disk image into a new buffer.
-   Returns the file data (caller must free) and sets *newlength,
-   or returns NULL if the disk image couldn't be parsed. */
-static uint8_t *get_largest_file(uint8_t *data, size_t length, size_t *newlength)
-{
-    uint8_t *file = NULL;
-    *newlength = 0;
-    DiskImage *d64 = di_create_from_data(data, (int)length);
-    if (d64) {
-        RawDirEntry *largest = di_find_largest_file_entry(d64);
-        if (largest) {
-            ImageFile *c64file = di_open(d64, largest->rawname, largest->type, "rb");
-            if (c64file)
-                file = di_read_file(c64file, newlength);
-        }
-        free(d64);
-    }
-    return file;
-}
-
 /* Extract a file from a T64 tape image by record number (1-based).
    Reads the directory entry at offset 32 + 32*filenum to find the data
    offset and size, then returns a buffer with the 2-byte C64 load address
-   prepended. Updates *extent to the extracted file size. */
+   prepended. Updates *extent to the extracted file size. The last record
+   runs to the end of the image rather than to its end address, which some
+   T64 writers get wrong. */
 static uint8_t *GetFileFromT64(int filenum, int number_of_records, uint8_t **sf, size_t *extent)
 {
     /* The directory entry itself must lie inside the image */
@@ -153,30 +141,14 @@ static uint8_t *GetFileFromT64(int filenum, int number_of_records, uint8_t **sf,
     return file;
 }
 
-/* Extract a file from a D64 image starting at a specific track/sector.
-   Used for Temple of Terror variants that store files at known disk
-   locations rather than in the directory. */
-static uint8_t *get_file_at_ts(uint8_t *data, size_t length, size_t *newlength, int track, int sector)
-{
-    uint8_t *file = NULL;
-    *newlength = 0;
-    DiskImage *d64 = di_create_from_data(data, (int)length);
-    if (d64) {
-        ImageFile *c64file = di_create_file_from_ts(d64, track, sector);
-        if (c64file)
-            file = di_read_file(c64file, newlength);
-        free(d64);
-    }
-    return file;
-}
-
-/* Temple of Terror ships with two versions on the same disk/tape:
-   a graphics version and a text-only version with extra prose. The user
-   can also pick a hybrid that combines pictures from the graphics version
-   with the expanded text from the text-only version. This function
-   extracts both files, prompts for a choice, and decompresses. */
-/* The Trianon disks keep the graphics version behind a loader of this
-   many bytes, and the text-only version without its first 16 bytes. */
+/* The Trianon disks keep the two versions out of the directory: the
+   graphics version starts at track 17, sector 1, behind a loader of
+   this many bytes, and the text-only version at track 20, sector 16,
+   without its first 16 bytes. */
+#define TRIANON_GRAPHICS_TRACK 17
+#define TRIANON_GRAPHICS_SECTOR 1
+#define TRIANON_TEXT_TRACK 20
+#define TRIANON_TEXT_SECTOR 16
 #define TRIANON_LOADER_SIZE 176
 #define TRIANON_MISSING_HEADER 16
 
@@ -190,13 +162,18 @@ static uint8_t *get_file_at_ts(uint8_t *data, size_t length, size_t *newlength, 
 #define HYBRID_IMAGES_SIZE 0x4123
 #define HYBRID_EXTRA_SIZE 0x4124
 
+/* Temple of Terror ships with two versions on the same disk/tape:
+   a graphics version and a text-only version with extra prose. The user
+   can also pick a hybrid that combines pictures from the graphics version
+   with the expanded text from the text-only version. This function
+   extracts both files, prompts for a choice, and decompresses. */
 static GameIDType terror_menu(uint8_t **sf, size_t *extent, int recindex)
 {
     c64rec rec = c64_registry[recindex];
     c64rec textrec = c64_registry[recindex + 1];
     int isdisk = (rec.type == TYPE_D64);
     OpenBottomWindow();
-    Display(Bottom, "This %s image contains one version of Temple of Terror with pictures, and one with without pictures but slightly more text.\n\nPlease select one:\n1. Graphics version\n2. Text-only version\n3. Use pictures from file 1 and text from file 2", isdisk ? "disk" : "datasette");
+    Display(Bottom, "This %s image contains one version of Temple of Terror with pictures, and one without pictures but slightly more text.\n\nPlease select one:\n1. Graphics version\n2. Text-only version\n3. Use pictures from file 1 and text from file 2", isdisk ? "disk" : "datasette");
 
     size_t size1 = *extent;
     size_t size2 = *extent;
@@ -204,14 +181,16 @@ static GameIDType terror_menu(uint8_t **sf, size_t *extent, int recindex)
     uint8_t *file2 = NULL;
     switch (rec.layout) {
     case TWO_FILES_BY_TS: {
-        uint8_t *tempfile1 = get_file_at_ts(*sf, *extent, &size1, 17, 1);
+        uint8_t *tempfile1 = di_get_file_at_ts(*sf, *extent, &size1,
+            TRIANON_GRAPHICS_TRACK, TRIANON_GRAPHICS_SECTOR);
         if (tempfile1 != NULL && size1 > TRIANON_LOADER_SIZE) {
             size1 -= TRIANON_LOADER_SIZE;
             file1 = MemAlloc(size1);
             memcpy(file1, tempfile1 + TRIANON_LOADER_SIZE, size1);
         }
         free(tempfile1);
-        uint8_t *tempfile2 = get_file_at_ts(*sf, *extent, &size2, 20, 16);
+        uint8_t *tempfile2 = di_get_file_at_ts(*sf, *extent, &size2,
+            TRIANON_TEXT_TRACK, TRIANON_TEXT_SECTOR);
         if (tempfile2 != NULL) {
             file2 = MemCalloc(size2 + TRIANON_MISSING_HEADER);
             memcpy(file2 + TRIANON_MISSING_HEADER, tempfile2, size2);
@@ -324,7 +303,7 @@ GameIDType DetectC64(uint8_t **sf, size_t *extent)
                 return terror_menu(sf, extent, i);
             if (record.type == TYPE_D64) {
                 size_t newlength;
-                uint8_t *largest_file = get_largest_file(*sf, *extent, &newlength);
+                uint8_t *largest_file = di_get_largest_file(*sf, *extent, &newlength);
 
                 if (largest_file) {
                     free(*sf);
@@ -335,7 +314,7 @@ GameIDType DetectC64(uint8_t **sf, size_t *extent)
                 }
 
             /* T64 tape image: extract the first file record */
-            } else if (c64_registry[i].type == TYPE_T64) {
+            } else {
                 int number_of_records = READ_LE_UINT16(*sf + 36);
                 size_t size = *extent;
                 uint8_t *first_file = GetFileFromT64(1, number_of_records, sf, &size);
@@ -345,10 +324,8 @@ GameIDType DetectC64(uint8_t **sf, size_t *extent)
                 free(*sf);
                 *sf = first_file;
                 *extent = size;
-            } else {
-                Fatal("Unknown type");
             }
-            return ProcessC64(sf, extent, c64_registry[i]);
+            return ProcessC64(sf, extent, record);
         }
     }
     return UNKNOWN_GAME;
@@ -357,30 +334,21 @@ GameIDType DetectC64(uint8_t **sf, size_t *extent)
 /* Decompress the extracted C64 file and look up the game in the master table.
 
    Runs unp64 for the number of iterations specified in the registry entry
-   (applying switches on a specific iteration if configured), then performs
-   checksum-specific memory block relocations for variants that store
-   graphics data at non-standard addresses. Finally, sets the global Game
-   pointer to the matching entry in games[]. */
+   (applying switches on a specific iteration if configured), then moves
+   the picture data into place for the releases the registry says need it.
+   Finally, sets the global Game pointer to the matching entry in games[]. */
 static GameIDType ProcessC64(uint8_t **sf, size_t *extent, c64rec record)
 {
     C64DecompressIterations(sf, extent, record.decompress_iterations,
-        record.switches, record.parameter);
+        record.switches, record.switch_pass);
 
-    /* Relocate graphics data for specific releases that store image blocks
-       at addresses the engine doesn't expect. memmove handles the
-       overlapping Rebel Planet case correctly. */
-    switch (record.chk) {
-    case 0xa46f: /* Rebel Planet: move block from 0x098a to 0x198a */
-        memmove(*sf + 0x198a, *sf + 0x098a, 0x2e79);
-        break;
-    case 0x78ba: /* He-Man: move image data from 0xc802 to 0x4808 */
-        memmove(*sf + 0x4808, *sf + 0xc802, 0x1400);
-        break;
-    case 0xf3b4: /* Temple of Terror (FBR crack): move image data from 0xd802 to 0x4808 */
-        memmove(*sf + 0x4808, *sf + 0xd802, 0x1400);
-        break;
-    default:
-        break;
+    /* The two ranges overlap in Rebel Planet, hence memmove. */
+    if (record.relocate_size != 0) {
+        if (record.relocate_to + record.relocate_size > *extent
+            || record.relocate_from + record.relocate_size > *extent) {
+            Fatal("The unpacked game file is too short");
+        }
+        memmove(*sf + record.relocate_to, *sf + record.relocate_from, record.relocate_size);
     }
 
     /* Look up the full GameInfo entry in the master games[] table */
