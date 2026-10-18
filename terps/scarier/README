@@ -56,9 +56,9 @@ instrumentation (structural dumps, per-turn traces, the lenient census),
 compiled only into the headless walkthrough binary with -DSCARIER_DUMP_TOOLS
 and never into a shipping build.
 
-See ADRIFT4_vs_ADRIFT5.md for a detailed comparison of the two code paths
+See notes/ADRIFT4_vs_ADRIFT5.md for a detailed comparison of the two code paths
 (formats, saves, restriction evaluation, division rounding, and RNG
-streams), and ADRIFT-5-XML.md for a specification of the ADRIFT 5
+streams), and notes/ADRIFT-5-XML.md for a specification of the ADRIFT 5
 adventure and save formats.
 
 
@@ -67,11 +67,12 @@ Playing
 
 Both engines understand a family of `glk` meta-commands; `glk help` lists
 them and `glk summary` prints the current settings.  Among them: `glk map`
-and `glk zoom` for the map pane, `glk colour`, `glk verbose`, `glk
-capacity`, `glk patches`, `glk assist` (combat, move, repeat, room -- the
-work-arounds some games converted between ADRIFT versions need; games known
-to need one get it turned on with a notice at startup), `glk script`, `glk
-inputlog` and `glk readlog`, and `glk undo` / `glk restore` / `glk restart`
+and `glk zoom` for the map pane, `glk colour`, `glk verbose`, `glk notify`,
+`glk statusline`, `glk capacity`, `glk patches`, `glk assist` (combat,
+move, repeat, room -- the work-arounds some games converted between ADRIFT
+versions need; games known to need one get it turned on with a notice at
+startup), `glk script`, `glk inputlog` and `glk readlog`, and `glk undo` /
+`glk restore` / `glk restart`
 / `glk quit` for when the game's own commands are unavailable.
 
 
@@ -96,8 +97,10 @@ Testing
 
 Makefile.headless builds the standalone test and dump harnesses used for
 regression work -- an ANSI/stdout runner plus a family of a5* tools -- and
-runs the suites.  The engine objects are shared between harnesses and the
-suite stages run in parallel:
+runs the suites; the engine objects are shared between harnesses and the
+suite stages run in parallel.  test/README.md maps the test tree, records
+the decisions the 2026 clean-up passes settled and the safety net for any
+further change.
 
     make -f Makefile.headless test           # full suite
     make -f Makefile.headless quick          # the same minus the two

@@ -88,14 +88,7 @@ lib_check_put_recursion (scr_gameref_t game, scr_int object, scr_int target,
 
 
 /*
- * A seen object lying elsewhere that a 4.0 put's noun names, admitted to
- * lib_put_named_filter() for the rest of that one command; see
- * lib_put_in_multiple_common().
- */
-scr_int lib_put_seen_absent = -1;
-
-/*
- * The twin case: an object present but still unseen, resolved for the rest
+ * An object present but still unseen, resolved for the rest
  * of that one command by asking the scorer directly instead of the seen-gated
  * %text% parse; see lib_put_fragment_present_object() and
  * lib_put_in_multiple_common().  Named so lib_put_print_object_or_that() can
@@ -177,8 +170,7 @@ lib_put_named_filter (scr_gameref_t game, scr_int object)
            && obj_indirectly_in_room (game, object, gs_playerroom (game));
 
   if (lib_is_version_400 (game))
-    return object == lib_put_seen_absent
-           || obj_indirectly_in_room (game, object, gs_playerroom (game));
+    return obj_indirectly_in_room (game, object, gs_playerroom (game));
 
   /*
    * Pre-4.0 is wider than "held or worn" as well.  run390 takes an object
@@ -463,7 +455,6 @@ lib_put_implicit_take (scr_gameref_t game, scr_int object, scr_int target,
 /*
  * lib_put_outcome_t
  * lib_output_length()
- * lib_put_drop_statics_400()
  *
  * What a put backend has to tell its caller beyond the object moves.
  * is_refusal_only is the 4.0 size/capacity refusal that leaves the line
@@ -1297,8 +1288,8 @@ lib_put_in_refused (scr_gameref_t game, scr_bool is_refusal_only)
  * End the put's line and settle its claim from the backend's outcome; see
  * lib_put_outcome_t.  Only the container backend ever reports a
  * refusal-only outcome; see lib_put_in_refused().  A 4.0 put that printed
- * nothing (statics only, see lib_put_drop_statics_400()) is left unclaimed
- * with no line ending, for the task pass to answer.
+ * nothing is left unclaimed with no line ending, for the task pass to
+ * answer.
  *
  * A 4.0 put whose only words are the implicit take's announcement, with a
  * task claiming it silently, ends on the game's DontUnderstand text.  run400
@@ -1539,7 +1530,6 @@ scr_bool lib_put_refusal_swept = FALSE;
 void
 lib_put_reset (void)
 {
-  lib_put_seen_absent = -1;
   lib_put_present_unseen = -1;
   lib_put_announce_bytes = 0;
   lib_put_mid_word_390 = FALSE;

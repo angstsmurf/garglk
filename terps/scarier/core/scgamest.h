@@ -86,6 +86,11 @@ typedef struct scr_objectstate_s
    * remove-then-drop of the watch shed its 9).  -1 means cleared; the
    * Runner writes &HFF, which we do not reproduce because it could falsely
    * match object 255 in a large game.
+   *
+   * Since 2026-10-17 the weigh routine no longer reads this field (the
+   * phantom weight is a deliberate deviation, see obj_weigh()); it is kept
+   * for the possession predicates gs_runner_possessed() / gs_runner_worn(),
+   * which walk it through closed containers.
    */
   scr_int runner_parent;
   scr_int openness;
@@ -269,8 +274,8 @@ typedef struct scr_game_s
 
   /*
    * Basic game state -- rooms, objects, and so on.  The state arrays are
-   * std::vector (P3 RAII): they free themselves when the game is delete'd, so a
-   * throw partway through gs_create (a prop_* scr_fatal) no longer leaks the
+   * std::vector: they free themselves when the game is delete'd, so a throw
+   * partway through gs_create (a prop_* scr_fatal) leaks none of the
    * already-allocated arrays.  The *_count fields remain the iteration source
    * of truth (matching every existing loop, the serializer, and the asserts);
    * the vectors are sized to match.
@@ -306,14 +311,13 @@ typedef struct scr_game_s
   scr_bool verbose;
   scr_bool notify_score_change;
   /*
-   * Owning game-status strings, freed at scope exit (P3 RAII).
+   * Owning game-status strings, freed at scope exit.
    * scr_owned_string preserves the engine's char* contract exactly -- .get()
    * hands the raw pointer to readers and NULL stays NULL (no empty-vs-unset
    * confusion) -- while a scr_fatal_error / run_loop_halt thrown mid-turn
-   * (e.g. from a pf_filter -> prop_* deep in run_update_status) no longer
-   * leaks the buffer being replaced.  Having non-trivial members makes
-   * scr_game_s non-POD, so gs_create new()s it and gs_destroy delete()s it
-   * (the old scr_malloc + 0xaa poison is gone).
+   * (e.g. from a pf_filter -> prop_* deep in run_update_status) does not
+   * leak the buffer being replaced.  Having non-trivial members makes
+   * scr_game_s non-POD, so gs_create new()s it and gs_destroy delete()s it.
    */
   scr_owned_string current_room_name;
   scr_owned_string status_line;

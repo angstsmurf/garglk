@@ -441,10 +441,6 @@ scr_bool run_rerun_skips_tasks = FALSE;
    space for space; see run_match_task_commands(). */
 scr_bool run_rerun_exact_spaces = FALSE;
 
-/* Set for a line no task matches the Runner's way; see
-   run_line_matches_task_strictly(). */
-scr_bool run_lenient_tasks = FALSE;
-
 /* Set while run_line_yields_to_library() asks whether a task command that
    names a verb takes the line, and whether that task's restrictions let it
    run; see there. */
@@ -518,7 +514,9 @@ run_any_task_ran_this_command (void)
  * spent-task port had taken most of those cells: re-measured it costs six
  * goldens and no win -- alexis, alexis_worn_cube, lifesimulation, life and
  * everything change one line of text, the_hangover two turns -- and all six
- * rows then match their Runner transcripts exactly.  3.7/3.8 are left alone:
+ * rows then match their Runner transcripts exactly (but for the "Done."
+ * that replaced the DontUnderstand text on 2026-10-15, a deliberate
+ * deviation; see run_line_t::settle()).  3.7/3.8 are left alone:
  * checktask is the same routine there, but no probe has been run and no corpus
  * row asks.
  */
@@ -587,7 +585,7 @@ run_line_names_word (const std::string &line, const scr_char *name)
 
 /* Put WITH in place of every FIND in TEXT, the way VB's Replace() with a
    count of -1 does. */
-void
+static void
 run_replace_all (std::string &text, const scr_char *find,
                  const scr_char *with)
 {
@@ -794,7 +792,7 @@ run_substitute_variable_references (scr_gameref_t game, std::string &literal)
 
       if (end == std::string::npos)
         break;
-      if (run_lenient_tasks)
+      if (uip_get_lenient_tasks ())
         {
           std::string text;
 
@@ -1091,7 +1089,7 @@ struct run_command_match_t
                        const scr_char *pattern_, scr_pattern_facts_t &facts_)
     : game (game_), task (task_), string (string_), version (version_),
       pattern (pattern_), facts (facts_), first (facts_.first),
-      lenient (run_lenient_tasks && !facts_.has_character),
+      lenient (uip_get_lenient_tasks () && !facts_.has_character),
       is_matched (FALSE), matched_input (string_),
       wild (FALSE), group (FALSE), refs (0),
       numeric (FALSE), variable (FALSE), literal_ref (FALSE) {}

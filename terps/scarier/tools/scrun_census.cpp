@@ -309,7 +309,6 @@ run_census_t::mark_all_seen ()
     gs_set_object_seen (game, index_, TRUE);
   GS_FOR_EACH_NPC (game, index_)
     gs_set_npc_seen (game, index_, TRUE);
-  run_lenient_tasks = FALSE;
   uip_set_lenient_tasks (FALSE);
 }
 
@@ -325,13 +324,9 @@ scr_bool
 run_census_t::matches (scr_int which, const std::string &line,
                        scr_bool lenient) const
 {
-  run_lenient_tasks = lenient;
-  uip_set_lenient_tasks (lenient);
-  const scr_bool matched
-      = run_census_matches_task (game, which, line.c_str ());
-  run_lenient_tasks = FALSE;
-  uip_set_lenient_tasks (FALSE);
-  return matched;
+  const scr_lenient_tasks_guard lenient_tasks (lenient);
+
+  return run_census_matches_task (game, which, line.c_str ());
 }
 
 scr_bool
@@ -695,9 +690,52 @@ run_lenient_census (scr_gameref_t game)
   census.summary ();
 }
 
+/*
+ * run_meta_census()
+ *
+ * SCR_CENSUS_META: the tasks that take a line one of SCARE's own meta
+ * commands answers -- the words no Runner has, which a task can therefore
+ * lose to us whenever it does not claim the line itself (restrictions that
+ * fail without a message, a task with nothing to say, a task already done).
+ */
+static void
+run_meta_census (scr_gameref_t game)
+{
+  static const scr_char *const WORDS[] = {
+    "verbose", "brief", "notify", "notification", "notify on", "notify off",
+    "hints", "hist", "hist 1", "redo", "redo 1", "gpl", "license",
+    "statusline", "stats", "q", "g", "i", "z", nullptr
+  };
+  run_census_t census (game);
+
+  census.mark_all_seen ();
+  for (scr_int task = 0; task < census.task_count; task++)
+    {
+      /* A task that takes nonsense too is a catch-all, not a claim on the
+         word. */
+      if (census.matches (task, "qzxqzx", TRUE)
+          || census.matches (task, "qzxqzx 1", TRUE))
+        continue;
+
+      for (const scr_char *const *word = WORDS; *word; word++)
+        {
+          const scr_bool strict = census.matches (task, *word, FALSE);
+
+          if (strict || census.matches (task, *word, TRUE))
+            scr_trace ("CENSUS meta word=\"%s\" task=%ld %s\n", *word,
+                       (long) task, strict ? "strict" : "lenient");
+        }
+    }
+}
+
 scr_bool
 run_census_requested (scr_gameref_t game)
 {
+  if (getenv ("SCR_CENSUS_META"))
+    {
+      run_meta_census (game);
+      return TRUE;
+    }
   if (getenv ("SCR_CENSUS_LENIENT") == nullptr)
     return FALSE;
   run_lenient_census (game);

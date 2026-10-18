@@ -201,7 +201,7 @@ scr_char run_prior_element[LINE_BUFFER_SIZE];
  * The last two typed lines, lower-cased, as the Runner's command history
  * holds them: run390 shifts every new line into MemVar_468100 at 436268-
  * 43629F, run380 into MemVar_44F098, so (1) is the line being run and (2)
- * the one typed before it.  Blank lines go in too.  See run_with_history().
+ * the one typed before it.  Blank lines go in too.  See run_element_command().
  */
 std::string run_typed_line, run_previous_typed_line;
 
@@ -297,7 +297,6 @@ private:
      get_outer_400(). */
   std::string outer_battle;
   const scr_char *outer_line = string;
-  scr_bool outer_twice = FALSE, outer_silent = FALSE;
   size_t outer_mark = 0;
   /* Where the buffer stood when the task dispatcher got the line, and what
      the passes before and after it settled; see task_peek() and
@@ -315,6 +314,25 @@ private:
   /* Whether the library cascade got the line at all; see battle_pass(). */
   scr_bool reached_library = FALSE;
 };
+
+/*
+ * silent_read_line()
+ *
+ * Whether LINE is a `read` line.  Below 4.0 a task that ran and printed
+ * nothing claims its line, but not a read line: the Runner's "I don't
+ * understand." there would swallow the object's own read text, and
+ * Everything Emanuelle's task 14 (`read * diary *`, silent, sets the
+ * variable for the best ending) would hide the diary, the game's one
+ * clue.  The task has run; the library's read shows the text.  Deliberate
+ * deviation from the Runner, a convenience.
+ */
+static scr_bool
+silent_read_line (scr_gameref_t game, const scr_char *line)
+{
+  return line
+      && run_c_word_pre400 (run_get_version (gs_get_bundle (game)), line,
+                            "read") == 0;
+}
 
 /*
  * run_line_t::reset()
@@ -353,12 +371,8 @@ run_line_t::lenient ()
   if (run_strict_tasks_requested (string))
     return FALSE;
 #endif
-  const scr_bool outer_lenient = run_lenient_tasks;
-  run_lenient_tasks = FALSE;
-  uip_set_lenient_tasks (FALSE);
-  const scr_bool line_lenient = !run_line_matches_task_strictly (game, string);
-  run_lenient_tasks = outer_lenient;
-  return line_lenient;
+  const scr_lenient_tasks_guard strict_match (FALSE);
+  return !run_line_matches_task_strictly (game, string);
 }
 
 /*
@@ -622,9 +636,9 @@ run_line_t::put_pass ()
           {
             const run_dispatch_input_guard input (put_line);
 
-            uip_set_containment (put_contained);
+            const scr_containment_guard containment (put_contained);
+
             status = run_priority_commands (game, put_line);
-            uip_set_containment (FALSE);
           }
           refused = !status && run_priority_refused;
           if (refused)
@@ -825,8 +839,16 @@ run_line_t::get_outer_400 ()
                * twice (runner_transcripts/britishfox.txt); p4TDBL `get bob`
                * "BOBTEXT.  BOBTEXT." with its counter up by two, `get eel`,
                * nothing printed by either run, "I don't understand.".
+               *
+               * Deliberate deviation (2026-10-17): the task runs ONCE.  The
+               * second run is a Runner accident that doubles the task's
+               * text and its actions (a counter it bumps goes up by two),
+               * which no game was written for.  The line is claimed as
+               * get_piece's; whatever the one run printed answers it.
+               * Logged under "Deliberate deviations" in
+               * test/adrift4/notes/WINE-TRANSCRIPTS-TODO.md.
                */
-              outer_twice = TRUE;
+              status = TRUE;
             }
           else
             {
@@ -908,16 +930,10 @@ run_line_t::task_peek ()
   claimed_before_tasks = status;
   if (!status && !refused)
     {
-      /* get_piece's run does not count as the dispatcher's one task, and
-         the take it stood in for has had its turn: no silent-literal peek
-         to hand the line back to it. */
-      run_matcher_second_pass = outer_twice;
       status = run_game_commands_in_parser_context (
                    game, task_string, FALSE,
-                   !outer_twice
-                   && run_get_version (gs_get_bundle (game))
-                      >= TAF_VERSION_400);
-      run_matcher_second_pass = FALSE;
+                   run_get_version (gs_get_bundle (game))
+                   >= TAF_VERSION_400);
       if (run_any_task_ran_this_command ())
         run_takes_second_pass_370 (game, string, task_string, task_mark);
       /* A silent task on a take or drop line: the handler's own "Take
@@ -941,7 +957,8 @@ run_line_t::task_peek ()
   silent_before_priority = !claimed_before_tasks && !status
       && run_any_task_ran_this_command ()
       && pf_buffer_length (filter) == task_mark
-      && run_get_version (gs_get_bundle (game)) < TAF_VERSION_400;
+      && run_get_version (gs_get_bundle (game)) < TAF_VERSION_400
+      && !silent_read_line (game, task_string);
 }
 
 /*
@@ -1069,8 +1086,8 @@ run_line_t::task_passes ()
    * CompleteText, draws nothing in run390x per alexis_tr_trace.txt, and
    * ticking there put every later battle roll a turn out of phase), then the
    * claim (2026-09-20), which is the `!silent_task_390` guard on library():
-   * status stays FALSE, so run_process_input_line() prints
-   * DontUnderstand, and nothing between here and there speaks.
+   * the Runner then prints DontUnderstand over the empty buffer, and
+   * Scarier prints "Done." instead (deliberate deviation, see settle()).
    *
    * It is what run390 answers `read diary` in everything, `piss` in life,
    * `turn off tv` in lifesimulation and `open chest` in alexis with, and in
@@ -1089,7 +1106,8 @@ run_line_t::task_passes ()
   silent_task_390 = !claimed_before_tasks && !status
       && run_any_task_ran_this_command ()
       && pf_buffer_length (filter) == task_mark
-      && run_get_version (gs_get_bundle (game)) < TAF_VERSION_400;
+      && run_get_version (gs_get_bundle (game)) < TAF_VERSION_400
+      && !silent_read_line (game, task_string);
 }
 
 /*
@@ -1147,18 +1165,9 @@ run_line_t::battle_pass ()
     }
   if (inv_listed)
     status = TRUE;
-  /*
-   * After get_piece's double run the library has nothing left for the line:
-   * get_outer was its take.  Whatever either run printed answers it;
-   * nothing at all is DontUnderstand (p4TDBL `get eel`,
-   * runner_probes/tdbl.run400.txt).
-   */
-  outer_silent = outer_twice && !status;
-  if (outer_silent && pf_buffer_length (filter) > outer_mark)
-    status = TRUE;
-  if (!status && !silent_task_390 && !outer_silent && battle_kinds)
+  if (!status && !silent_task_390 && battle_kinds)
     status = run_battle_line (game, string, battle_kinds);
-  reached_library = !status && !silent_task_390 && !outer_silent;
+  reached_library = !status && !silent_task_390;
 }
 
 /*
@@ -1171,7 +1180,7 @@ run_line_t::battle_pass ()
 void
 run_line_t::library ()
 {
-  if (status || silent_task_390 || outer_silent)
+  if (status || silent_task_390)
     return;
 
   /*
@@ -1403,6 +1412,26 @@ run_line_t::settle ()
     }
 
   /*
+   * Deliberate deviation (2026-10-15): a silent task's line that nothing
+   * else answered says "Done." where every Runner before 4.0 prints the
+   * game's DontUnderstand text over the empty buffer.  The task ran -- it
+   * opened the chest (alexis), the tatami mat (namiki), scored the filing
+   * cabinet (the_hangover) -- so "What you typed doesn't work." told the
+   * player the opposite of what happened.  The claim itself stays: letting
+   * the library answer the line instead made it refuse what the task had
+   * just done ("The loose tatami mat is already open!", "You can't open
+   * that.") in six of the eight goldens it reached.  The turn is the
+   * Runner's still: is_admin above decides it, so the line is not a turn at
+   * 3.9 and is one at 3.7/3.8 (see task_passes()) -- which the FALSE status
+   * the line returned before this never ticked.
+   */
+  if (silent_task_390 && !status && pf_buffer_length (filter) == task_mark)
+    {
+      pf_buffer_string (filter, "Done.\n");
+      status = TRUE;
+    }
+
+  /*
    * 4.0: a line a task answered that also names a term two present
    * characters share is not a turn.  run400 generaltasks ticks only when
    * `MemVar_4941EC = &HFF` (48B5B5: turns, walks and events), and the
@@ -1471,6 +1500,12 @@ run_line_t::settle ()
    * answer ("You don't have the stone!") to it.  `probe`, a task, keeps its
    * own text (the 48B60C gate above).
    *
+   * Not over a battle line that settled on one target or asked which was
+   * meant (lib_battle_400_line_claimed()), nor over that question's answer
+   * (lib_battle_which_pending()): the deviation logged in
+   * lib_battle_attack_many() keeps the blow, or the question, in view and
+   * lets `guard` answer "Guard or Droid?".
+   *
    * Both halves of the question read ONE untyped index, MemVar_4941EC, and
    * the object half (48B6B1) gets first refusal: it runs when that index is
    * also a valid object index AND the line names that object, printing the
@@ -1484,6 +1519,8 @@ run_line_t::settle ()
   if (run_get_version (gs_get_bundle (game)) >= TAF_VERSION_400
       && game->is_running
       && !run_any_task_ran_this_command ()
+      && !lib_battle_400_line_claimed ()
+      && !lib_battle_which_pending ()
       && lib_npc_400_line_names_namesakes (game, string))
     {
       pf_empty (filter);
@@ -1500,7 +1537,7 @@ run_line_t::settle ()
 scr_bool
 run_line_t::finish (scr_bool result)
 {
-  if (SCR_TRACING_DEVIATIONS () && run_lenient_tasks)
+  if (SCR_TRACING_DEVIATIONS () && uip_get_lenient_tasks ())
     {
       std::string tasks;
       size_t task;

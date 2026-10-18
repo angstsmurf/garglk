@@ -68,7 +68,7 @@ static const scr_uint GAME_MAGIC = 0x35aed26e;
  * pointer that is not a game, so it is an assert().  The normal builds keep
  * asserts, which is why the validity test here is the file-local inline
  * gs_game_ok() rather than a call to the exported gs_is_game_valid() (that
- * call was 5% of self time in the 2026-10-04 profile, see REFACTOR-TODO.md).
+ * call was 5% of self time in the 2026-10-04 profile, see test/README.md).
  * gs_is_game_valid() is the same test for the other modules.
  *
  * The index half is not an invariant.  Entity indexes reach these accessors
@@ -2390,15 +2390,12 @@ gs_destroy (scr_gameref_t game)
    * The state arrays (rooms, objects, tasks, events, npcs and their walksteps,
    * the *_references) are std::vector and the owning game strings
    * (current_room_name, status_line, title, author, hint_text) are
-   * scr_owned_string; all free themselves when the game is delete'd below
-   * (P3 RAII), so there is nothing to free by hand here.
+   * scr_owned_string; all free themselves when the game is delete'd below,
+   * so there is nothing to free by hand here.
    */
 
   /*
    * Free the game state itself; its destructor releases the owned strings.
-   * (The old 0xaa poison is gone -- it would corrupt the unique_ptr members the
-   * destructor is about to free, the same reason the scr_filter_s struct moved
-   * to new/delete in P3.)
    */
   delete game;
 }
