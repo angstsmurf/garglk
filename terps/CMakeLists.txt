@@ -349,12 +349,19 @@ endif()
 # Plus 1.0 for Scott Adams Graphic Adventures Plus games
 #
 if(WITH_PLUS)
-    set(PLUS_INCLUDE_DIRS plus)
+    set(PLUS_INCLUDE_DIRS plus common_utils common_sagadraw readwoz)
     terp(plus
-        SRCS plus/plusmain.c plus/animations.c plus/apple2detect.c plus/apple2draw.c
-        plus/atari8c64draw.c plus/atari8detect.c plus/c64detect.c plus/extracommands.c
-        plus/companionfile.c plus/gameinfo.c plus/graphics.c plus/layouttext.c plus/loaddatabase.c
-        plus/parseinput.c plus/pcdraw.c plus/restorestate.c plus/stdetect.c plus/stdraw.c
+        SRCS
+        plus/animations.c plus/apple2detect.c plus/atari8detect.c plus/c64detect.c
+        plus/companionfile.c plus/dumpactions.c plus/extracommands.c plus/gameinfo.c
+        plus/graphics.c plus/loaddatabase.c plus/opcodes.c plus/parseinput.c plus/plusmain.c
+        plus/restorestate.c plus/sagadraw_glue.c plus/stdetect.c plus/stdraw.c
+        common_utils/common_file_utils.c common_utils/common_utils.c
+        common_utils/companion_search.c common_utils/layouttext.c
+        common_utils/memory_allocation.c common_utils/randomness.c
+        common_sagadraw/apple2draw.c common_sagadraw/c64a8draw.c
+        common_sagadraw/gm_artifact.c common_sagadraw/pcdraw.c
+        readwoz/ciderpress.c readwoz/woz2nib.c
         INCLUDE_DIRS ${PLUS_INCLUDE_DIRS}
         LIBS c64diskimage
         GPL2)
@@ -453,20 +460,37 @@ endif()
 #
 
 if(WITH_SCOTT)
-    set(SCOTT_INCLUDE_DIRS scott scott/saga scott/ai_uk scott/ti994a)
+    find_package(ZLIB REQUIRED)
+    set(SCOTT_INCLUDE_DIRS scott scott/saga scott/ai_uk scott/ti994a taylor
+        aiukgraphics common_utils common_sagadraw common_zxscreen decompressz80
+        readwoz ${ZLIB_INCLUDE_DIRS})
     terp(scott
-        SRCS scott/scott.c scott/bsd.c scott/ai_uk/c64decrunch.c scott/ai_uk/debug.c
-        scott/ai_uk/decompresstext.c scott/ai_uk/line_drawing.c
-        scott/ai_uk/game_specific.c scott/ai_uk/hulk.c scott/ai_uk/gremlins.c
-        scott/ai_uk/decompressz80.c scott/detectgame.c scott/scottgameinfo.c scott/layouttext.c
-        scott/ti994a/load_ti99_4a.c scott/parser.c scott/restorestate.c
-        scott/ai_uk/ringbuffer.c scott/ai_uk/robinofsherwood.c scott/ai_uk/sagadraw.c
-        scott/saga/apple2detect.c scott/saga/apple2draw.c scott/saga/atari8c64draw.c
-        scott/saga/atari8detect.c scott/saga/ciderpress.c scott/saga/pcdraw.c scott/saga/saga.c
-        scott/saga/sagagraphics.c scott/saga/woz2nib.c scott/titleimage.c
-        scott/ai_uk/seasofblood.c scott/ti994a/ti99_4a_terp.c
+        SRCS
+        scott/bsd.c scott/detect_game.c scott/parser.c scott/restore_state.c
+        scott/scott.c scott/scott_actions.c scott/scott_display.c
+        scott/scott_game_info.c scott/scott_meta.c scott/title_image.c
+        scott/ai_uk/c64decrunch.c scott/ai_uk/decompress_text.c
+        scott/ai_uk/game_specific.c scott/ai_uk/gremlins.c scott/ai_uk/hulk.c
+        scott/ai_uk/line_drawing.c scott/ai_uk/ringbuffer.c
+        scott/ai_uk/robin_of_sherwood.c scott/ai_uk/sagadraw.c
+        scott/ai_uk/seas_of_blood.c scott/saga/apple2_vector_draw.c
+        scott/saga/apple2detect.c scott/saga/atari8detect.c
+        scott/saga/atari_8bit_vector_draw.c scott/saga/c64_small.c
+        scott/saga/c64a8scott.c scott/saga/saga.c scott/saga/sagagraphics.c
+        scott/saga/vector_common.c scott/ti994a/load_ti99_4a.c
+        scott/ti994a/rtpi_graphics.c scott/ti994a/ti99_4a_terp.c
+        scott/ti994a/ti99_disk.c
+        scott/ti994a/unzip_in_mem.c common_utils/common_file_utils.c
+        common_utils/common_utils.c common_utils/companion_search.c
+        common_utils/layouttext.c common_utils/memory_allocation.c
+        common_utils/randomness.c common_sagadraw/apple2draw.c
+        common_sagadraw/c64a8draw.c common_sagadraw/gm_artifact.c
+        common_sagadraw/gm_vector.c common_sagadraw/pcdraw.c aiukgraphics/aiukpalette.c
+        aiukgraphics/irmak.c aiukgraphics/taylordraw.c common_zxscreen/zx_title.c
+        decompressz80/alkatraz.c decompressz80/tapetzx.c decompressz80/z80snap.c
+        decompressz80/zxscreen.c readwoz/ciderpress.c readwoz/woz2nib.c
         INCLUDE_DIRS ${SCOTT_INCLUDE_DIRS}
-        LIBS c64diskimage unp64)
+        LIBS c64diskimage unp64 ${ZLIB_LIBRARIES})
 endif()
 
 # ------------------------------------------------------------------------------
@@ -555,12 +579,22 @@ endif()
 #
 
 if(WITH_TAYLOR)
-    set(TAYLOR_INCLUDE_DIRS taylor)
+    set(TAYLOR_INCLUDE_DIRS taylor aiukgraphics common_utils common_zxscreen
+        decompressz80)
     terp(taylor
-        SRCS taylor/animations.c taylor/c64decrunch.c taylor/decompressz80.c
-        taylor/decrypttotloader.c taylor/extracommands.c taylor/extracttape.c taylor/gameinfo.c
-        taylor/layouttext.c taylor/loadtotpicture.c taylor/parseinput.c taylor/player.c
-        taylor/restorestate.c taylor/sagadraw.c taylor/ui.c taylor/utility.c
+        SRCS
+        taylor/actions.c taylor/alkatraz_screen.c taylor/animations.c
+        taylor/c64decrunch.c taylor/decrypttotloader.c taylor/extracommands.c
+        taylor/extracttape.c taylor/gameinfo.c taylor/gameload.c taylor/graphics.c
+        taylor/loading_screen.c taylor/parseinput.c
+        taylor/player.c taylor/restorestate.c taylor/textoutput.c taylor/ui.c
+        common_utils/common_file_utils.c common_utils/common_utils.c
+        common_utils/companion_search.c common_utils/layouttext.c
+        common_utils/memory_allocation.c common_utils/randomness.c
+        aiukgraphics/aiukpalette.c aiukgraphics/irmak.c
+        aiukgraphics/taylordraw.c common_zxscreen/zx_title.c
+        decompressz80/alkatraz.c decompressz80/tapetzx.c decompressz80/z80snap.c
+        decompressz80/zxscreen.c
         INCLUDE_DIRS ${TAYLOR_INCLUDE_DIRS}
         LIBS c64diskimage unp64
         GPL2)
