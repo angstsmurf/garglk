@@ -493,6 +493,7 @@ int main()
         scarier/glk/os_glk_platform.cpp
         scarier/glk/os_glk_resources.cpp
         scarier/glk/os_glk_status.cpp
+        scarier/glk/os_glk_styles.cpp
         scarier/glk/os_glk_symbols.cpp
         scarier/glk/os_glk.cpp
         scarier/library/sclibrar_battle.cpp
