@@ -1632,6 +1632,14 @@ static Color rgbshift(const Color &rgb)
 
 // Return the effective hyperlink for drawing. Overlays disable links globally;
 // see gli_get_hyperlink().
+// A hyperlink is drawn in the link colour, which follows the last zcolor
+// set anywhere -- unless the game gave the link a zcolor of its own, which
+// it keeps, the way it would keep it if it were not a link.
+Color attr_t::link_fg(const Styles &styles) const
+{
+    return fgcolor.has_value() ? fg(styles) : gli_link_color;
+}
+
 glui32 attr_t::hyperlink() const
 {
     return gli_overlays_used ? 0 : hyper;

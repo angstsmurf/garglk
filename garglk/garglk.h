@@ -863,6 +863,7 @@ struct attr_t {
     [[nodiscard]] bool reversed(const Styles &styles) const;
     [[nodiscard]] Color bg(const Styles &styles) const;
     [[nodiscard]] Color fg(const Styles &styles) const;
+    [[nodiscard]] Color link_fg(const Styles &styles) const;
     [[nodiscard]] glui32 hyperlink() const;
     void set_hyperlink(glui32 linkval);
 

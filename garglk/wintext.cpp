@@ -657,7 +657,7 @@ void win_textbuffer_redraw(window_t *win)
                     if (gli_underline_hyperlinks) {
                         gli_draw_rect(rx0 + 1, y + gli_baseline + 1,
                                 rx1 - rx0 + 1, 1,
-                                gli_link_color);
+                                ln.attrs[a].link_fg(dwin->styles));
                     }
                     gli_put_hyperlink(link, rx0, y,
                             rx1,
@@ -681,7 +681,7 @@ void win_textbuffer_redraw(window_t *win)
             if (gli_underline_hyperlinks) {
                 gli_draw_rect(rx0 + 1, y + gli_baseline + 1,
                         rx1 - rx0 + 1, 1,
-                        gli_link_color);
+                        ln.attrs[a].link_fg(dwin->styles));
             }
             gli_put_hyperlink(link, rx0, y,
                     rx1,
@@ -717,7 +717,7 @@ void win_textbuffer_redraw(window_t *win)
             if (ln.attrs[a] != ln.attrs[b]) {
                 link = ln.attrs[a].hyperlink();
                 font = ln.attrs[a].font(dwin->styles);
-                color = link != 0 ? gli_link_color : ln.attrs[a].fg(dwin->styles);
+                color = link != 0 ? ln.attrs[a].link_fg(dwin->styles) : ln.attrs[a].fg(dwin->styles);
                 x = gli_draw_string_uni(x, y + gli_baseline,
                         font, color, &ln.chars[a], b - a, spw);
                 a = b;
@@ -725,7 +725,7 @@ void win_textbuffer_redraw(window_t *win)
         }
         link = ln.attrs[a].hyperlink();
         font = ln.attrs[a].font(dwin->styles);
-        color = link != 0 ? gli_link_color : ln.attrs[a].fg(dwin->styles);
+        color = link != 0 ? ln.attrs[a].link_fg(dwin->styles) : ln.attrs[a].fg(dwin->styles);
         gli_draw_string_uni(x, y + gli_baseline,
                 font, color, &ln.chars[a], linelen - a, spw);
     }
