@@ -435,6 +435,11 @@ void win_textbuffer_redraw(window_t *win)
     y0 = win->bbox.y0 + gli_tmarginy;
     y1 = win->bbox.y1 - gli_tmarginy;
 
+    // A window narrower than its margins has no room for text.
+    if (x1 <= x0) {
+        return;
+    }
+
     pw = x1 - x0 - 2 * GLI_SUBPIX;
 
     // check if any part of buffer is selected
