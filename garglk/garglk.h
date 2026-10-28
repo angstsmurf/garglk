@@ -1062,6 +1062,7 @@ struct window_textbuffer_t {
     std::deque<std::vector<glui32>>::iterator history_it = history.begin();
 
     // for paging
+    bool paging = true;
     int lastseen = 0;
     int scrollpos = 0;
     int scrollmax = 0;

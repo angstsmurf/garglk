@@ -66,6 +66,7 @@ typedef int32_t glsi32;
 #define GLK_MODULE_GARGLKWINSIZE
 #define GLK_MODULE_GARGLK_FILE_RESOURCES
 #define GLK_MODULE_GARGLKOVERLAY
+#define GLK_MODULE_GARGLKPAGING
 
 /* Define a macro for a function attribute that indicates a function that
     never returns. (E.g., glk_exit().) We try to do this only in C compilers
@@ -631,6 +632,20 @@ extern void garglk_get_cell_size_pixels(double *width, double *height);
 extern void garglk_cells_in_pixels(glui32 width, glui32 height, glui32 *columns, glui32 *rows);
 
 #endif /* GLK_MODULE_GARGLKOVERLAY */
+
+#ifdef GLK_MODULE_GARGLKPAGING
+
+/* A text buffer stops at a [more] prompt when more text arrives than it can
+ * show, and the prompt takes keystrokes until it is cleared. A window that
+ * never takes input, such as a status or decoration window, would then hold
+ * up input meant for another window. Turning paging off makes a text buffer
+ * scroll straight to its newest text instead. Paging is on for every new
+ * window; turning it off also drops a [more] prompt already showing. Other
+ * window types are left alone.
+ */
+extern void garglk_window_set_paging(winid_t win, glui32 paging);
+
+#endif /* GLK_MODULE_GARGLKPAGING */
 
 /* non standard keycodes */
 #define keycode_Erase               (0xffffef7f)

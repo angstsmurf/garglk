@@ -912,6 +912,27 @@ void win_textbuffer_redraw(window_t *win)
     }
 }
 
+void garglk_window_set_paging(window_t *win, glui32 paging)
+{
+    if (win == nullptr) {
+        gli_strict_warning("window_set_paging: invalid ref");
+        return;
+    }
+
+    if (win->type != wintype_TextBuffer) {
+        return;
+    }
+
+    window_textbuffer_t *dwin = win->winbuffer();
+
+    dwin->paging = paging != 0;
+    if (!dwin->paging && (dwin->lastseen != 0 || dwin->scrollpos != 0)) {
+        dwin->lastseen = 0;
+        dwin->scrollpos = 0;
+        touchscroll(dwin);
+    }
+}
+
 static void scrollresize(window_textbuffer_t *dwin)
 {
     int i;
@@ -955,7 +976,9 @@ static void scrolloneline(window_textbuffer_t *dwin, bool forced, bool flow_brea
         lines_to_scroll = std::max(dwin->ladjn, dwin->radjn);
     }
 
-    dwin->lastseen += lines_to_scroll;
+    if (dwin->paging) {
+        dwin->lastseen += lines_to_scroll;
+    }
     dwin->scrollmax += lines_to_scroll;
     if (dwin->unread_marker_line.has_value()) {
         *dwin->unread_marker_line += lines_to_scroll;
