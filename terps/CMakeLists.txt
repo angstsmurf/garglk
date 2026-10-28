@@ -529,7 +529,7 @@ if(WITH_TADS)
         tads/tads3/vmtype.cpp tads/tads3/vmtypedh.cpp tads/tads3/vmtz.cpp
         tads/tads3/vmtzobj.cpp tads/tads3/vmundo.cpp tads/tads3/vmvec.cpp)
 
-    list(APPEND srcs tads/tads3/vmconnom.cpp)
+    list(APPEND srcs tads/tads3/vmconhtm.cpp)
 
     set(macros GLK VMGLOB_STRUCT GLK_UNICODE GLK_TIMERS TC_TARGET_T3 RUNTIME)
     if(WIN32)
