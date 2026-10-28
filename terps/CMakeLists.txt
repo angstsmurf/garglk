@@ -475,8 +475,10 @@ endif()
 #
 if(WITH_TADS)
     set(srcs tads/glk/memicmp.c tads/glk/osbuffer.c tads/glk/osextra.c
-        tads/glk/osglk.c tads/glk/osglkban.c tads/glk/osmisc.c
-        tads/glk/osparse.c tads/glk/osportable.cc tads/glk/t23run.cpp
+        tads/glk/osglk.c tads/glk/osglkban.c tads/glk/oshtml.c
+        tads/glk/osmisc.c tads/glk/osparse.c tads/glk/osportable.cc
+        tads/glk/osres.c tads/glk/ossound.c tads/glk/osstyles.c
+        tads/glk/t23run.cpp
         tads/glk/t2askf.c tads/glk/t2indlg.c tads/glk/t3askf.cpp
         tads/glk/t3indlg.cpp tads/glk/vmuni_cs.cpp)
 

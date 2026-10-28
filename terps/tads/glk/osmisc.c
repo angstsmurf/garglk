@@ -78,13 +78,51 @@ void os_gen_charmap_filename(char *filename, char *internal_id, char *argv0)
  *   system clock or some other source of an unpredictable and changing
  *   seed value 
  */
+
+#include "glk.h"
+#include "oshtml.h"
+
+#ifdef SPATTERLIGHT
+
+#include "randomness.h"
+extern glui32 gli_determinism;
+
+/*
+ *   All randomness draws from the shared erkyrath_random()
+ *   (terps/common_utils/randomness.c), the same RNG used by the Scott,
+ *   TaylorMade, Plus and Comprehend ports.  These functions are TADS's seed
+ *   sources (os_rand seeds the LCG; os_gen_rand_bytes seeds ISAAC, the default
+ *   RNG) -- so once they draw from erkyrath_random() all of TADS's randomness
+ *   is reproducible under a fixed seed.  The generator is seeded once: the
+ *   fixed seed 1234 under the determinism testing theme, otherwise 0 to let it
+ *   pick a platform-native seed.
+ */
+static void ensure_erkyrath_seeded(void)
+{
+    static int seeded = 0;
+    if (!seeded) {
+        set_erkyrath_random(gli_determinism ? 1234 : 0);
+        seeded = 1;
+    }
+}
+
+#endif
+
+time_t time(time_t *);
+
 void os_rand(long *seed)
 {
+#ifdef SPATTERLIGHT
+    ensure_erkyrath_seeded();
+    *seed = (long)erkyrath_random();
+#else
     time_t t;
     time( &t );
     *seed = (long)t;
+#endif
 }
 
+#ifndef SPATTERLIGHT
 /*
  *   Xorshift PRNG from http://www.jstatsoft.org/v08/i14/paper
  */
@@ -103,33 +141,44 @@ static unsigned long xorshift(void)
 
 static void xorinit(void)
 {
-    seed[0] = time(NULL);
+    seed[0] = (uint32_t)time(NULL);
     seed[1] = seed[0] << 1;
     seed[2] = getpid();
     seed[3] = seed[1] & ~seed[2];
     xorshift();
 }
+#endif
 
 /*
  *   Generate random bytes for use in seeding a PRNG.
  */
 void os_gen_rand_bytes(unsigned char *buf, size_t len)
 {
+#ifdef SPATTERLIGHT
+    size_t ct;
+    ensure_erkyrath_seeded();
+    for (ct = 0; ct < len; ct++)
+        buf[ct] = (unsigned char)(erkyrath_random() & 0xFF);
+#else
     /* seed the Xorshift PRNG */
     xorinit();
 
     int ct, val;
     for (ct = 0; ct < len; ct++)
     {
-        val = xorshift();
+        val = (int)xorshift();
         buf[ct] = (val - 1) & 0xFF;
     }
+#endif
 }
 
 
 /* flush any buffered display output */
 void os_flush(void)
 {
+    /* the status line's held-back spaces stay with it */
+    if (os_get_status() == 0)
+        oshtml_flush();
 }
 
 /*
@@ -198,10 +247,22 @@ void os_nonstop_mode(int flag)
  */
 void os_sleep_ms(long delay_in_milliseconds)
 {
+#ifdef SPATTERLIGHT
+    if (osglk_vclock())
+    {
+        osglk_vclock_advance((unsigned long)delay_in_milliseconds);
+        return;
+    }
+#endif
+#ifdef GLK_TIMERS
+    if (delay_in_milliseconds > 0)
+        osglk_sleep_ms((unsigned long)delay_in_milliseconds);
+    return;
+#endif
 #ifdef _WIN32
     Sleep(delay_in_milliseconds);
 #else
-    usleep(delay_in_milliseconds * 1000);
+    usleep((useconds_t)(delay_in_milliseconds * 1000));
 #endif
 }
 
@@ -316,26 +377,49 @@ void os_set_save_ext(const char *ext)
 void os_get_charmap(char *mapname, int charmap_id)
 {
 #ifndef GLK_UNICODE
-    strcpy(mapname, "asc7dflt");
+    strncpy(mapname, "asc7dflt", 32);
 #else
     switch (charmap_id)
     {
         case OS_CHARMAP_DISPLAY:
         case OS_CHARMAP_FILECONTENTS:
-            strcpy(mapname, "utf-8");
+            strncpy(mapname, "utf-8", 32);
             break;
 
         case OS_CHARMAP_FILENAME:
         default:
-            strcpy(mapname, "asc7dflt");
+            strncpy(mapname, "asc7dflt", 32);
             break;
     }
 #endif
 }
 
+/*
+ *   A loop guard.  TADS 2 asks os_break after every 1000 p-code instructions.
+ *   A game that runs 100 million of them (about five seconds) without reading
+ *   input or writing text is taken to be stuck, and is stopped as if the
+ *   player had pressed break: the engine undoes the command.  (Six, given a
+ *   one-letter answer at its death prompt in HTML mode, loops forever without
+ *   asking again.)
+ */
+#define STUCK_BREAKS 100000
+static unsigned long idle_breaks;
+
+void osglk_not_idle(void)
+{
+    idle_breaks = 0;
+}
+
 int os_break(void)
 {
-  return 0;
+    if (++idle_breaks >= STUCK_BREAKS)
+    {
+        os_printz("\n[The game was stuck in a loop, so the last command "
+                  "has been cancelled.]\n");
+        idle_breaks = 0;
+        return 1;
+    }
+    return 0;
 }
 
 /*

@@ -25,8 +25,8 @@ add_executable(tadsr)
 target_link_libraries(tadsr glk)
 target_include_directories(tadsr PRIVATE . ../tads2/ ../tads3/)
 add_sources(tadsr "./"
-    SRCS memicmp.c osbuffer.c osextra.c osglk.c osglkban.c osmisc.c osparse.c
-    osportable.cc t23run.cpp t2askf.c t2indlg.c t3askf.cpp t3indlg.cpp vmuni_cs.cpp)
+    SRCS memicmp.c osbuffer.c osextra.c osglk.c osglkban.c oshtml.c osmisc.c
+    osparse.c osportable.cc osres.c ossound.c osstyles.c t23run.cpp t2askf.c t2indlg.c t3askf.cpp t3indlg.cpp vmuni_cs.cpp)
 add_sources(tadsr "../tads2/"
     SRCS argize.c bif.c bifgdum.c cmap.c cmd.c dat.c dbgtr.c errmsg.c execmd.c
     fio.c fioxor.c getstr.c ler.c linfdum.c lst.c mch.c mcm.c mcs.c obj.c oem.c

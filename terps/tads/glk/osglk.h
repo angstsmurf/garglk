@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <time.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #ifndef NOMINMAX
@@ -331,6 +332,22 @@ int os_memicmp(const char *a, const char *b, int n);
 void os_put_buffer (unsigned char *buf, size_t len);
 void os_get_buffer (unsigned char *buf, size_t len, size_t init);
 unsigned char *os_fill_buffer (unsigned char *buf, size_t len);
+
+/*
+ *   The TADS 2 formatter passes HTML markup through to os_print, for
+ *   oshtml.c to translate
+ */
+#define USE_HTML
+
+/* The game read input or wrote text: it isn't stuck (os_break, osmisc.c) */
+void osglk_not_idle(void);
+
+/* os_sleep_ms on a Glk timer, so what was drawn is shown (osglk.c) */
+void osglk_sleep_ms(unsigned long ms);
+
+/* Spatterlight's virtual clock, for its tests; here the clock is real */
+#define osglk_vclock() 0
+#define osglk_vclock_advance(ms) ((void)(ms))
 
 #define OS_MAXWIDTH 255
 
