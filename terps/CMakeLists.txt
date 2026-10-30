@@ -476,6 +476,7 @@ endif()
 if(WITH_TADS)
     set(srcs tads/glk/memicmp.c tads/glk/osbuffer.c tads/glk/osextra.c
         tads/glk/osglk.c tads/glk/osglkban.c tads/glk/oshtml.c
+        tads/glk/osglkpage.c
         tads/glk/osglktagban.c
         tads/glk/oshtml_banner.c
         tads/glk/oshtml_scan.c
